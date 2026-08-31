@@ -117,14 +117,20 @@ struct AppConfig {
   double longitude;
   std::string timezone;
   int threshold_seconds;
-  int adhan_duration_seconds;
+  int adhan_duration_seconds;  // legacy global; not used for scheduling after migration
+  int adhan_durations[PRAYER_COUNT];
   int fade_duration_ms;
   std::string aladhan_endpoint;
   std::string islamicfinder_endpoint;
   int http_timeout_ms;
 
   Location location() const;
+  int adhan_duration_for(PrayerId id) const;
 };
+
+int default_adhan_duration_seconds(PrayerId id);
+bool valid_adhan_duration_seconds(int seconds);
+int clamp_adhan_duration_seconds(int seconds);
 
 AppConfig default_config();
 

@@ -4,14 +4,23 @@ namespace adhan {
 
 constexpr const char* kAppName = "Adhan Volume";
 constexpr const char* kAppFolderName = "AdhanVolume";
-constexpr const char* kVersion = "1.0.2";
+constexpr const char* kVersion = "1.0.3";
 constexpr const char* kMutexName = "Local\\AdhanVolumeSingleton";
 
-constexpr int kConfigVersion = 1;
+constexpr int kConfigVersion = 2;
 constexpr int kCacheVersion = 1;
 constexpr int kScheduleVersion = 1;
 
 constexpr int DEFAULT_ADHAN_DURATION_SECONDS = 180;
+constexpr int DEFAULT_ADHAN_DURATION_FAJR_SECONDS = 300;
+constexpr int DEFAULT_ADHAN_DURATION_DHUHR_SECONDS = 300;
+constexpr int DEFAULT_ADHAN_DURATION_ASR_SECONDS = 180;
+constexpr int DEFAULT_ADHAN_DURATION_MAGHRIB_SECONDS = 180;
+constexpr int DEFAULT_ADHAN_DURATION_ISHA_SECONDS = 420;
+constexpr int kAdhanDurationMinMinutes = 1;
+constexpr int kAdhanDurationMaxMinutes = 30;
+constexpr int kAdhanDurationMinSeconds = 60;
+constexpr int kAdhanDurationMaxSeconds = 1800;
 constexpr int DEFAULT_FADE_DURATION_MS = 4000;
 constexpr int DEFAULT_THRESHOLD_SECONDS = 60;
 constexpr int kSchedulerIdleIntervalMs = 15000;
@@ -44,7 +53,7 @@ constexpr const char* kDefaultAladhanEndpoint = "https://api.aladhan.com/v1/timi
 constexpr const char* kDefaultIslamicFinderEndpoint =
     "https://www.islamicfinder.us/index.php/api/prayer_times";
 
-constexpr int kThresholdOptions[] = {30, 60, 180, 300};
-constexpr int kThresholdOptionCount = 4;
+constexpr int kThresholdOptions[] = {30, 60, 120};
+constexpr int kThresholdOptionCount = 3;
 
 }  // namespace adhan

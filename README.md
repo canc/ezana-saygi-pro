@@ -1,4 +1,4 @@
-# Adhan Volume
+# Ezana Saygı PRO
 
 Lightweight native Windows utility that fades the **system master volume** to 0 before each prayer (Adhan) time, holds it at 0 during the expected Adhan, then restores the exact volume you had before.
 
@@ -36,8 +36,9 @@ The window is in **Turkish** by default.
 
 1. Confirm **Konum** (default: Antalya, Türkiye).
 2. Confirm **Zaman Dilimi** shows `Avrupa/İstanbul (GMT+3)`.
-3. Set **Ezan Vaktinden Önce**: 30 saniye, 1 dakika, 3 dakika, or 5 dakika. Default is **1 dakika**.
-4. Use **Aktif / Pasif** to enable or disable automatic fading. Scheduling continues while the process is in the tray.
+3. Set **Ezan Vaktinden Önce**: 30 saniye, 1 dakika, or 2 dakika. Default is **1 dakika**.
+4. Use **Ezan Sürelerini Ayarla** to set each prayer’s Adhan length (defaults: İmsak 5 dk, Öğle 5 dk, İkindi 3 dk, Akşam 3 dk, Yatsı 7 dk).
+5. Use **Aktif / Pasif** to enable or disable automatic fading. Scheduling continues while the process is in the tray.
 
 The app does **not** add itself to Windows startup.
 
@@ -60,9 +61,9 @@ Example with Maghrib at 19:23, threshold 1 minute, Adhan duration 3 minutes, fad
 | 19:26    | fade-in starts |
 | 19:26:04 | original volume restored |
 
-Sunrise is **not** a trigger. Only Fajr, Dhuhr, Asr, Maghrib, and Isha.
+Sunrise is **not** a trigger. Only İmsak, Öğle, İkindi, Akşam, and Yatsı.
 
-The Adhan hold duration is an internal setting (`adhan_duration_seconds`, default **180**).
+Each prayer has its own Adhan hold duration, configured under **Ezan Sürelerini Ayarla**. Defaults: İmsak 5 min, Öğle 5 min, İkindi 3 min, Akşam 3 min, Yatsı 7 min.
 
 ## Enable / disable and tray
 

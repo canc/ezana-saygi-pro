@@ -136,11 +136,53 @@ AppConfig default_config() {
   c.timezone = kDefaultTimezone;
   c.threshold_seconds = DEFAULT_THRESHOLD_SECONDS;
   c.adhan_duration_seconds = DEFAULT_ADHAN_DURATION_SECONDS;
+  for (int i = 0; i < PRAYER_COUNT; ++i) c.adhan_durations[i] = 0;
+  c.adhan_durations[PRAYER_FAJR] = DEFAULT_ADHAN_DURATION_FAJR_SECONDS;
+  c.adhan_durations[PRAYER_DHUHR] = DEFAULT_ADHAN_DURATION_DHUHR_SECONDS;
+  c.adhan_durations[PRAYER_ASR] = DEFAULT_ADHAN_DURATION_ASR_SECONDS;
+  c.adhan_durations[PRAYER_MAGHRIB] = DEFAULT_ADHAN_DURATION_MAGHRIB_SECONDS;
+  c.adhan_durations[PRAYER_ISHA] = DEFAULT_ADHAN_DURATION_ISHA_SECONDS;
   c.fade_duration_ms = DEFAULT_FADE_DURATION_MS;
   c.aladhan_endpoint = kDefaultAladhanEndpoint;
   c.islamicfinder_endpoint = kDefaultIslamicFinderEndpoint;
   c.http_timeout_ms = kHttpTimeoutMs;
   return c;
+}
+
+int default_adhan_duration_seconds(PrayerId id) {
+  switch (id) {
+    case PRAYER_FAJR:
+      return DEFAULT_ADHAN_DURATION_FAJR_SECONDS;
+    case PRAYER_DHUHR:
+      return DEFAULT_ADHAN_DURATION_DHUHR_SECONDS;
+    case PRAYER_ASR:
+      return DEFAULT_ADHAN_DURATION_ASR_SECONDS;
+    case PRAYER_MAGHRIB:
+      return DEFAULT_ADHAN_DURATION_MAGHRIB_SECONDS;
+    case PRAYER_ISHA:
+      return DEFAULT_ADHAN_DURATION_ISHA_SECONDS;
+    default:
+      return DEFAULT_ADHAN_DURATION_SECONDS;
+  }
+}
+
+bool valid_adhan_duration_seconds(int seconds) {
+  if (seconds < kAdhanDurationMinSeconds || seconds > kAdhanDurationMaxSeconds) return false;
+  return (seconds % 60) == 0;
+}
+
+int clamp_adhan_duration_seconds(int seconds) {
+  int minutes = seconds / 60;
+  if (seconds <= 0 || minutes < kAdhanDurationMinMinutes) return kAdhanDurationMinSeconds;
+  if (minutes > kAdhanDurationMaxMinutes) return kAdhanDurationMaxSeconds;
+  return minutes * 60;
+}
+
+int AppConfig::adhan_duration_for(PrayerId id) const {
+  if (id < 0 || id >= PRAYER_COUNT) return default_adhan_duration_seconds(PRAYER_MAGHRIB);
+  int v = adhan_durations[id];
+  if (!valid_adhan_duration_seconds(v)) return default_adhan_duration_seconds(id);
+  return v;
 }
 
 Location AppConfig::location() const {
