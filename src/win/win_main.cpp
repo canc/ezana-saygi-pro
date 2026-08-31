@@ -23,6 +23,7 @@
 #include "core/provider.h"
 #include "core/scheduler.h"
 #include "core/timezone.h"
+#include "core/volume_diag.h"
 #include "resource.h"
 #include "win_platform.h"
 
@@ -106,6 +107,7 @@ struct App {
 };
 
 App* g_app = 0;
+bool g_debug_logging = false;
 
 void balloon(App* a, const wchar_t* title, const wchar_t* msg) {
   if (!a) return;
@@ -380,6 +382,10 @@ void update_fade_timers(App* a) {
     KillTimer(a->hwnd, IDT_FADE);
     KillTimer(a->hwnd, IDT_MUTE);
   }
+  int poll = a->sched->recommended_poll_interval_ms(SystemClock().now_ms());
+  if (a->sched->is_fading()) poll = kSchedulerNearIntervalMs;
+  if (poll < kSchedulerNearIntervalMs) poll = kSchedulerNearIntervalMs;
+  SetTimer(a->hwnd, IDT_SCHEDULER, poll, 0);
 }
 
 void tick_scheduler(App* a) {
@@ -468,19 +474,33 @@ void on_create(HWND hwnd, App* a) {
   add_tray(a);
   SetTimer(hwnd, IDT_SCHEDULER, kSchedulerIdleIntervalMs, 0);
 
-  int64_t now = SystemClock().now_unix();
+  int64_t now_ms = SystemClock().now_ms();
+  int64_t now = now_ms / 1000;
   a->log->info("Application started");
   a->log->info(std::string("Location: ") + a->cfg.city + ", " + a->cfg.country);
   a->log->info(std::string("Timezone: ") + a->cfg.timezone);
+  {
+    float v = 0;
+    if (a->vol->get_master_volume(&v)) {
+      char buf[96];
+      std::snprintf(buf, sizeof(buf), "Master volume: %.0f%% (%s)", v * 100.0f, a->vol->backend_name());
+      a->log->info(buf);
+    } else {
+      a->log->warn(std::string("Master volume unavailable (") + a->vol->backend_name() + "): " +
+                   a->vol->last_error());
+    }
+  }
+  if (g_debug_logging) a->log->info("Debug scheduler logging enabled");
   a->cache->cleanup(now);
   a->sched->set_config(a->cfg);
-  a->sched->recover_on_startup(now * 1000);
+  a->sched->set_debug(g_debug_logging);
+  a->sched->recover_on_startup(now_ms);
 
   PrayerSchedule s;
   if (a->cache->peek_today(a->cfg.location(), now, &s)) {
     a->log->info("Daily prayer cache found");
     a->log->info("Using cached prayer schedule");
-    apply_schedule(a, s, true, now * 1000);
+    apply_schedule(a, s, true, now_ms);
   } else {
     a->log->info("Prayer cache missing");
     start_fetch(a, false);
@@ -573,12 +593,13 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       return TRUE;
     case WM_TIMECHANGE:
     case WM_RESUME_WORK: {
-      int64_t now = SystemClock().now_unix();
+      int64_t now_ms = SystemClock().now_ms();
+      int64_t now = now_ms / 1000;
       if (a->log) a->log->info("System time/resume: recalculating schedule");
       CacheEnsureResult r = a->cache->on_resume(a->cfg.location(), now);
-      if (r.have_schedule) apply_schedule(a, r.schedule, true, now * 1000);
+      if (r.have_schedule) apply_schedule(a, r.schedule, true, now_ms);
       else if (!a->fetching) start_fetch(a, false);
-      a->sched->evaluate(now * 1000);
+      a->sched->evaluate(now_ms);
       refresh_ui(a);
       return 0;
     }
@@ -643,7 +664,7 @@ int run(HINSTANCE inst, int show) {
 
   app.log = new Logger(join_path(app.root, "logs"));
   app.http = create_win_http_client();
-  app.vol = create_win_volume_controller();
+  app.vol = create_win_volume_controller(app.log);
   app.aladhan = new AladhanProvider(app.http, app.cfg.aladhan_endpoint);
   app.ifinder = new IslamicFinderProvider(app.http, app.cfg.islamicfinder_endpoint);
   app.provider = new FallbackProvider(app.aladhan, app.ifinder);
@@ -676,10 +697,43 @@ int run(HINSTANCE inst, int show) {
   return (int)msg.wParam;
 }
 
+void parse_cmdline(bool* volume_test, bool* debug) {
+  *volume_test = false;
+  *debug = false;
+  int argc = 0;
+  LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+  if (!argv) return;
+  for (int i = 1; i < argc; ++i) {
+    if (lstrcmpiW(argv[i], L"--volume-test") == 0) *volume_test = true;
+    if (lstrcmpiW(argv[i], L"--debug") == 0) *debug = true;
+  }
+  LocalFree(argv);
+}
+
+int run_volume_test_ui() {
+  HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+  std::string root = win_appdata_root();
+  Logger log(join_path(root, "logs"));
+  log.info("Volume self-test requested (--volume-test)");
+  VolumeController* vol = create_win_volume_controller(&log);
+  std::string report;
+  bool ok = run_volume_self_test(vol, &log, &report);
+  delete vol;
+  std::wstring wreport = to_wide(report.empty() ? std::string(ok ? "OK" : "FAILED") : report);
+  MessageBoxW(0, wreport.c_str(), ok ? L"Ezan Sesi — volume test OK" : L"Ezan Sesi — volume test FAILED",
+              MB_OK | (ok ? MB_ICONINFORMATION : MB_ICONERROR));
+  if (SUCCEEDED(hr)) CoUninitialize();
+  return ok ? 0 : 1;
+}
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   win_enable_dpi_aware();
+  bool volume_test = false;
+  parse_cmdline(&volume_test, &g_debug_logging);
+  if (volume_test) return run_volume_test_ui();
+
   HANDLE mutex = CreateMutexW(NULL, TRUE, L"Local\\AdhanVolumeSingleton");
   if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
     HWND existing = FindWindowW(L"AdhanVolumeMainWnd", 0);

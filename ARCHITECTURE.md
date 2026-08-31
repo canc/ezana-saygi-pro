@@ -15,7 +15,7 @@ Adhan Volume is a small **native Win32 C++11** application. That choice is what 
 APIs used (all present on Windows 7):
 
 - Window + tray: `user32`, `shell32` (`Shell_NotifyIcon`)
-- Master volume: WASAPI `IAudioEndpointVolume` (Vista+), mixer API fallback
+- Master volume: WASAPI `IAudioEndpointVolume` on the **current** default render endpoint (`eConsole`, then `eMultimedia`), with WinMM mixer fallback. Endpoint is re-resolved on failure, default-device change (`IMMNotificationClient`), and each fade capture. COM is initialized once on the UI thread (`CoInitializeEx` apartment).
 - HTTPS: WinHTTP with TLS 1.0–1.2 enabled (`WINHTTP_OPTION_SECURE_PROTOCOLS`)
 - Paths: `SHGetFolderPath` (`CSIDL_APPDATA`)
 - COM: `CoInitializeEx` apartment-threaded on the UI thread
@@ -33,9 +33,9 @@ Application (Win32 UI thread + one HTTP worker)
 │
 ├── Core
 │   ├── TimezoneService     Europe/Istanbul = GMT+3 (not Windows TZ)
-│   ├── PrayerScheduler     20s idle poll, 100ms only while fading
+│   ├── PrayerScheduler     adaptive wall-clock poll; WAITING_FOR_THRESHOLD is independent of the UI
 │   ├── FadeController      linear interpolation
-│   ├── VolumeController    master scalar only; mute flag preserved
+│   ├── VolumeController    WASAPI IAudioEndpointVolume (default render); WinMM mixer fallback
 │   └── App config          JSON in %APPDATA%\AdhanVolume
 │
 ├── Infrastructure
@@ -86,7 +86,11 @@ Internal times are UTC unix timestamps. Display and cache dates are converted wi
 
 The threshold is the **start** of fade-out, not the moment volume reaches 0.
 
-Event id `date + prayer + location` plus a processed-id set prevent duplicates across refresh, sleep, and clock changes. The loop is `SetTimer` 20s (idle), not a busy wait.
+The scheduler consumes the structured `PrayerSchedule` (unix timestamps in the location zone). It does **not** parse “Sonraki ezan” text. Before fade-out it holds an explicit `WAITING_FOR_THRESHOLD` event so threshold detection is independent of the next-prayer label.
+
+Event id `date + prayer + location` plus a processed-id set prevent duplicates. If the wall clock jumps **backward** into a window that was already marked processed, that id is un-marked so the event can run again (manual clock tests). Jumps **forward** into the window start fade immediately; jumps past `fade_in_end` skip the event.
+
+The loop is `SetTimer` with an adaptive interval: about **1 second** when the next fade start is within 2 minutes, **5 seconds** within 10 minutes, **15 seconds** when idle, and **100 ms** only while fading. There is no one-shot “sleep until 19:22”. `WM_TIMECHANGE` and resume also force an immediate reevaluation using `GetSystemTimeAsFileTime` (not `GetTickCount`).
 
 `active_event.json` records a captured original volume so a crash/restart can restore it when the window has ended, without overriding a volume the user already changed.
 
@@ -101,4 +105,4 @@ Event id `date + prayer + location` plus a processed-id set prevent duplicates a
 
 ## Tests
 
-`tests/test_main.cpp` runs on the host (Linux) against the same core library: timezone/03:10 math, cache hit/miss, location switch, API failure, scheduler fade, mute-hold, sleep/wake style resume. `make test-tz` repeats the suite under several `TZ` values to prove cache dates do not use `localtime()`.
+`tests/test_main.cpp` runs on the host (Linux) against the same core library: timezone/03:10 math, cache hit/miss, location switch, API failure, scheduler fade, mute-hold, clock-jump forward/back, volume self-test, sleep/wake style resume. `make test-tz` repeats the suite under several `TZ` values to prove cache dates do not use `localtime()`.

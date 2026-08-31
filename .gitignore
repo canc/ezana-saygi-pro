@@ -1,6 +1,9 @@
 build/
 dist/*
 !dist/AdhanVolume.exe
+!dist/AdhanVolume-x64.exe
+!dist/AdhanVolume-x86.exe
+!dist/AdhanVolume-arm64.exe
 *.o
 *.res
 .vs/

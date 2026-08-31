@@ -14,10 +14,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y g++ make python3 mingw-w64
       - name: Unit tests (multiple TZ)
         run: make test-tz
-      - name: Cross-compile AdhanVolume.exe
-        run: make windows
-      - name: Upload executable
+      - name: Cross-compile Windows EXEs (x64 + x86)
+        run: make windows windows-x86
+      - name: Upload executables
         uses: actions/upload-artifact@v4
         with:
           name: AdhanVolume-exe
-          path: dist/AdhanVolume.exe
+          path: |
+            dist/AdhanVolume.exe
+            dist/AdhanVolume-x64.exe
+            dist/AdhanVolume-x86.exe

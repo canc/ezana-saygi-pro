@@ -18,6 +18,7 @@
 #include "core/schedule.h"
 #include "core/scheduler.h"
 #include "core/timezone.h"
+#include "core/volume_diag.h"
 
 using namespace adhan;
 
@@ -75,12 +76,16 @@ struct FakeVolume : VolumeController {
   float vol;
   bool mute;
   int sets;
-  FakeVolume() : vol(0.65f), mute(false), sets(0) {}
+  bool fail_get;
+  bool fail_set;
+  FakeVolume() : vol(0.65f), mute(false), sets(0), fail_get(false), fail_set(false) {}
   bool get_master_volume(float* v) override {
+    if (fail_get) return false;
     *v = vol;
     return true;
   }
   bool set_master_volume(float v) override {
+    if (fail_set) return false;
     vol = v;
     ++sets;
     return true;
@@ -89,6 +94,8 @@ struct FakeVolume : VolumeController {
     *m = mute;
     return true;
   }
+  const char* backend_name() const override { return "fake"; }
+  const char* last_error() const override { return fail_get || fail_set ? "fake volume error" : ""; }
 };
 
 struct FakeProvider : PrayerTimeProvider {
@@ -195,6 +202,7 @@ static void test_timezone() {
 
   int64_t maghrib = istanbul_local_to_unix(d, 19, 23, 0);
   CHECK_EQ(maghrib, k1923_ist);
+  CHECK(format_zoned_hms(k1923_ist, "Europe/Istanbul") == "19:23:00");
 
   CHECK_EQ(timezone_offset_seconds("Europe/Istanbul", k1000_ist), 3 * 3600);
   CHECK_EQ(timezone_offset_seconds("UTC", k1000_ist), 0);
@@ -441,8 +449,9 @@ static void test_scheduler() {
   int64_t t1921 = (k1923_ist - 120) * 1000;
   sch.evaluate(t1921);
   CHECK(std::fabs(vol.vol - 0.65f) < 0.001f);
-  CHECK(sch.status().state == ST_IDLE || sch.status().state == ST_WAITING_FOR_THRESHOLD);
+  CHECK(sch.status().state == ST_WAITING_FOR_THRESHOLD);
   CHECK(sch.status().next_prayer_name == "Maghrib");
+  CHECK_EQ(sch.recommended_poll_interval_ms(t1921), kSchedulerNearIntervalMs);
 
   // 19:22 fade-out starts
   int64_t t1922 = (k1923_ist - 60) * 1000;
@@ -472,13 +481,24 @@ static void test_scheduler() {
 
   sch.evaluate(t1926 + 4000);
   CHECK(std::fabs(vol.vol - 0.65f) < 0.02f);
-  CHECK(sch.status().state == ST_IDLE);
+  // Maghrib is done; scheduler waits on Isha (20:53) rather than going idle.
+  CHECK(sch.status().state == ST_WAITING_FOR_THRESHOLD || sch.status().state == ST_IDLE);
+  CHECK(sch.status().next_prayer_name == "Isha");
 
-  // Duplicate: evaluating again must not re-fade
+  // Duplicate: evaluating again must not re-fade Maghrib
   int sets = vol.sets;
   sch.evaluate(t1926 + 5000);
   CHECK(std::fabs(vol.vol - 0.65f) < 0.02f);
   CHECK_EQ(vol.sets, sets);
+
+  // Manual clock-back after Maghrib completed: UI would show Maghrib again;
+  // scheduler must un-process and wait (not skip because of processed.json).
+  sch.evaluate(t1921);
+  CHECK(sch.status().next_prayer_name == "Maghrib");
+  CHECK(sch.status().state == ST_WAITING_FOR_THRESHOLD);
+  CHECK(std::fabs(vol.vol - 0.65f) < 0.02f);
+  sch.evaluate(t1922);
+  CHECK(sch.status().state == ST_FADING_OUT);
 
   // Disabled: no action
   FakeVolume vol2;
@@ -531,6 +551,49 @@ static void test_scheduler() {
 
   // Mute preserved: we never call set_mute (FakeVolume has no set_mute)
   CHECK(vol4.mute == false);
+
+  // Clock jump forward 18:50 → 19:22 must start fade without restart.
+  FakeVolume volJump;
+  volJump.vol = 0.67f;
+  Scheduler schJump(&volJump, &log, make_tmpdir());
+  cfg.enabled = true;
+  schJump.set_config(cfg);
+  schJump.set_schedule(s, true);
+  int64_t t1850 = (k1923_ist - 33 * 60) * 1000;
+  schJump.evaluate(t1850);
+  CHECK(schJump.status().state == ST_WAITING_FOR_THRESHOLD);
+  CHECK(std::fabs(volJump.vol - 0.67f) < 0.001f);
+  CHECK_EQ(schJump.recommended_poll_interval_ms(t1850), kSchedulerIdleIntervalMs);
+  schJump.evaluate(t1922);
+  CHECK(schJump.status().state == ST_FADING_OUT);
+  CHECK(schJump.status().next_prayer_name == "Maghrib");
+
+  // Clock jump backward mid-fade must restore and not stay muted.
+  schJump.evaluate(t1922 + 2000);
+  CHECK(volJump.vol < 0.67f);
+  schJump.evaluate(t1850);
+  CHECK(std::fabs(volJump.vol - 0.67f) < 0.02f);
+  CHECK(schJump.status().state == ST_WAITING_FOR_THRESHOLD);
+
+  // Capture failure: threshold is reached but fade does not start.
+  FakeVolume volFail;
+  volFail.vol = 0.5f;
+  volFail.fail_get = true;
+  Scheduler schFail(&volFail, &log, make_tmpdir());
+  schFail.set_config(cfg);
+  schFail.set_schedule(s, true);
+  schFail.evaluate(t1922);
+  CHECK(std::fabs(volFail.vol - 0.5f) < 0.001f);
+  CHECK(volFail.sets == 0);
+
+  // Volume self-test is independent of the scheduler.
+  FakeVolume volDiag;
+  volDiag.vol = 0.80f;
+  Logger logDiag(make_tmpdir() + "/logs");
+  std::string report;
+  CHECK(run_volume_self_test(&volDiag, &logDiag, &report));
+  CHECK(std::fabs(volDiag.vol - 0.80f) < 0.001f);
+  CHECK(report.find("Volume self-test PASSED") != std::string::npos);
 }
 
 static void test_config_roundtrip() {

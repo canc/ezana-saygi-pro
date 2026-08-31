@@ -41,4 +41,7 @@ int64_t today_istanbul_0310(int64_t now_unix);
 
 bool parse_hhmm(const std::string& text, int* hour, int* minute);
 
+// Wall-clock HH:MM:SS in the given IANA zone (not Windows TZ).
+std::string format_zoned_hms(int64_t unix_utc, const std::string& iana);
+
 }  // namespace adhan
