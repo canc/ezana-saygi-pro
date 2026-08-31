@@ -13,7 +13,7 @@ bool is_en() { return language() == LANG_EN; }
 
 }  // namespace
 
-const wchar_t* app_title() { return is_en() ? L"Adhan Volume" : L"Ezan Sesi"; }
+const wchar_t* app_title() { return L"Ezana Sayg\u0131 PRO"; }
 const wchar_t* status_label() { return is_en() ? L"Status" : L"Durum"; }
 const wchar_t* location_label() { return is_en() ? L"Location" : L"Konum"; }
 const wchar_t* city_label() { return is_en() ? L"City" : L"\u015eehir"; }
@@ -37,12 +37,14 @@ const wchar_t* threshold_option(int seconds) {
   if (is_en()) {
     if (seconds == 30) return L"30 seconds";
     if (seconds == 60) return L"1 minute";
+    if (seconds == 120) return L"2 minutes";
     if (seconds == 180) return L"3 minutes";
     if (seconds == 300) return L"5 minutes";
     return L"1 minute";
   }
   if (seconds == 30) return L"30 saniye";
   if (seconds == 60) return L"1 dakika";
+  if (seconds == 120) return L"2 dakika";
   if (seconds == 180) return L"3 dakika";
   if (seconds == 300) return L"5 dakika";
   return L"1 dakika";
@@ -69,7 +71,7 @@ const wchar_t* prayer(PrayerId id) {
   }
   switch (id) {
     case PRAYER_FAJR:
-      return L"Sabah";
+      return L"\u0130msak";
     case PRAYER_SUNRISE:
       return L"G\u00fcne\u015f";
     case PRAYER_DHUHR:
@@ -152,6 +154,17 @@ const wchar_t* status_no_remaining() {
   return is_en() ? L"No remaining prayers today" : L"Bug\u00fcn kalan ezan yok";
 }
 const wchar_t* em_dash() { return L"\u2014"; }
+
+const wchar_t* duration_settings() {
+  return is_en() ? L"Adhan durations" : L"Ezan S\u00fcrelerini Ayarla";
+}
+const wchar_t* duration_save() { return is_en() ? L"Save" : L"Kaydet"; }
+const wchar_t* duration_cancel() { return is_en() ? L"Cancel" : L"\u0130ptal"; }
+const wchar_t* duration_minutes() { return is_en() ? L"minutes" : L"dakika"; }
+const wchar_t* duration_invalid() {
+  return is_en() ? L"Enter a whole number of minutes from 1 to 30."
+                 : L"S\u00fcre 1 ile 30 dakika aras\u0131nda bir tam say\u0131 olmal\u0131d\u0131r.";
+}
 
 std::wstring timezone_text(const std::string& iana, int64_t unix_utc) {
   std::string raw = timezone_display(iana, unix_utc);

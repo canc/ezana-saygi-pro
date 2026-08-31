@@ -594,22 +594,120 @@ static void test_scheduler() {
   CHECK(run_volume_self_test(&volDiag, &logDiag, &report));
   CHECK(std::fabs(volDiag.vol - 0.80f) < 0.001f);
   CHECK(report.find("Volume self-test PASSED") != std::string::npos);
+
+  // Per-prayer duration: Isha default 7 minutes, Maghrib 3 minutes.
+  FakeVolume volIsha;
+  volIsha.vol = 0.5f;
+  Scheduler schIsha(&volIsha, &log, make_tmpdir());
+  AppConfig cfgIsha = default_config();
+  cfgIsha.threshold_seconds = 60;
+  schIsha.set_config(cfgIsha);
+  schIsha.set_schedule(s, true);
+  int64_t isha = s.prayers[PRAYER_ISHA].unix_utc;
+  schIsha.evaluate((isha - 60) * 1000);
+  CHECK(schIsha.status().state == ST_FADING_OUT);
+  CHECK(schIsha.status().next_prayer_name == "Isha");
+  CHECK_EQ(schIsha.active().adhan_duration_seconds, 420);
+  schIsha.evaluate((isha + 180) * 1000);
+  CHECK(schIsha.status().state == ST_MUTED);
+  CHECK(volIsha.vol < 0.01f);
+  schIsha.evaluate((isha + 420) * 1000);
+  CHECK(schIsha.status().state == ST_FADING_IN || schIsha.status().state == ST_RESTORED);
+
+  // Threshold 2 minutes.
+  FakeVolume volThr;
+  volThr.vol = 0.5f;
+  Scheduler schThr(&volThr, &log, make_tmpdir());
+  AppConfig cfgThr = default_config();
+  cfgThr.threshold_seconds = 120;
+  schThr.set_config(cfgThr);
+  schThr.set_schedule(s, true);
+  schThr.evaluate((k1923_ist - 121) * 1000);
+  CHECK(schThr.status().state == ST_WAITING_FOR_THRESHOLD);
+  CHECK(std::fabs(volThr.vol - 0.5f) < 0.001f);
+  schThr.evaluate((k1923_ist - 120) * 1000);
+  CHECK(schThr.status().state == ST_FADING_OUT);
+
+  // WAITING event picks up a duration change; MUTED does not.
+  FakeVolume volLive;
+  volLive.vol = 0.5f;
+  Scheduler schLive(&volLive, &log, make_tmpdir());
+  AppConfig cfgLive = default_config();
+  cfgLive.threshold_seconds = 60;
+  schLive.set_config(cfgLive);
+  schLive.set_schedule(s, true);
+  schLive.evaluate(t1921);
+  CHECK(schLive.status().state == ST_WAITING_FOR_THRESHOLD);
+  cfgLive.adhan_durations[PRAYER_MAGHRIB] = 600;
+  schLive.set_config(cfgLive);
+  CHECK_EQ(schLive.active().adhan_duration_seconds, 600);
+  schLive.evaluate(t1922 + 4000);
+  CHECK(schLive.status().state == ST_MUTED);
+  int64_t fade_in = schLive.active().fade_in_start_ms;
+  cfgLive.adhan_durations[PRAYER_MAGHRIB] = 120;
+  schLive.set_config(cfgLive);
+  CHECK_EQ(schLive.active().fade_in_start_ms, fade_in);
+  CHECK_EQ(schLive.active().adhan_duration_seconds, 600);
 }
 
 static void test_config_roundtrip() {
   std::string root = make_tmpdir();
   AppConfig c = default_config();
+  CHECK_EQ(c.adhan_duration_for(PRAYER_FAJR), 300);
+  CHECK_EQ(c.adhan_duration_for(PRAYER_DHUHR), 300);
+  CHECK_EQ(c.adhan_duration_for(PRAYER_ASR), 180);
+  CHECK_EQ(c.adhan_duration_for(PRAYER_MAGHRIB), 180);
+  CHECK_EQ(c.adhan_duration_for(PRAYER_ISHA), 420);
+
   c.city = "Ankara";
   c.latitude = 39.9334;
   c.longitude = 32.8597;
-  c.threshold_seconds = 180;
+  c.threshold_seconds = 120;
+  c.adhan_durations[PRAYER_MAGHRIB] = 360;
+  c.adhan_durations[PRAYER_ISHA] = 600;
   CHECK(save_config(root + "/config.json", c));
   AppConfig d;
   std::string err;
   CHECK(load_config(root + "/config.json", &d, &err));
   CHECK(d.city == "Ankara");
-  CHECK_EQ(d.threshold_seconds, 180);
-  CHECK_EQ(d.adhan_duration_seconds, DEFAULT_ADHAN_DURATION_SECONDS);
+  CHECK_EQ(d.threshold_seconds, 120);
+  CHECK_EQ(d.adhan_duration_for(PRAYER_FAJR), 300);
+  CHECK_EQ(d.adhan_duration_for(PRAYER_MAGHRIB), 360);
+  CHECK_EQ(d.adhan_duration_for(PRAYER_ISHA), 600);
+  std::string saved;
+  CHECK(read_file(root + "/config.json", &saved));
+  CHECK(saved.find("adhan_duration_seconds") == std::string::npos);
+  CHECK(saved.find("\"imsak\"") != std::string::npos);
+  CHECK(saved.find("\"maghrib\"") != std::string::npos);
+
+  // Legacy global duration + retired 3-minute threshold.
+  std::string legacy =
+      "{\"version\":1,\"enabled\":true,\"country\":\"Turkey\",\"city\":\"Antalya\","
+      "\"latitude\":36.8969,\"longitude\":30.6966,\"timezone\":\"Europe/Istanbul\","
+      "\"threshold_seconds\":180,\"adhan_duration_seconds\":120,\"fade_duration_ms\":4000,"
+      "\"aladhan_endpoint\":\"https://api.aladhan.com/v1/timings\","
+      "\"islamicfinder_endpoint\":\"https://www.islamicfinder.us/index.php/api/prayer_times\","
+      "\"http_timeout_ms\":15000}";
+  CHECK(write_file_atomic(root + "/legacy.json", legacy));
+  AppConfig e;
+  CHECK(load_config(root + "/legacy.json", &e, &err));
+  CHECK_EQ(e.threshold_seconds, 60);
+  CHECK_EQ(e.adhan_duration_for(PRAYER_FAJR), 120);
+  CHECK_EQ(e.adhan_duration_for(PRAYER_DHUHR), 120);
+  CHECK_EQ(e.adhan_duration_for(PRAYER_ISHA), 120);
+
+  std::string partial =
+      "{\"version\":2,\"enabled\":true,\"country\":\"Turkey\",\"city\":\"Antalya\","
+      "\"latitude\":36.8969,\"longitude\":30.6966,\"timezone\":\"Europe/Istanbul\","
+      "\"threshold_seconds\":30,\"adhan_durations\":{\"maghrib\":240},"
+      "\"fade_duration_ms\":4000}";
+  CHECK(write_file_atomic(root + "/partial.json", partial));
+  AppConfig f;
+  CHECK(load_config(root + "/partial.json", &f, &err));
+  CHECK_EQ(f.threshold_seconds, 30);
+  CHECK_EQ(f.adhan_duration_for(PRAYER_MAGHRIB), 240);
+  CHECK_EQ(f.adhan_duration_for(PRAYER_FAJR), 300);
+  CHECK_EQ(f.adhan_duration_for(PRAYER_ISHA), 420);
 }
 
 static void test_cache_key() {
@@ -633,7 +731,16 @@ static void test_i18n_turkish_default() {
   CHECK(std::wstring(adhan::ui::active()) == std::wstring(L"Aktif"));
   CHECK(std::wstring(adhan::ui::inactive()) == std::wstring(L"Pasif"));
   CHECK(std::wstring(adhan::ui::location_label()) == std::wstring(L"Konum"));
+  CHECK(std::wstring(adhan::ui::app_title()) == std::wstring(L"Ezana Sayg\u0131 PRO"));
+  CHECK(std::wstring(adhan::ui::prayer(PRAYER_FAJR)) == std::wstring(L"\u0130msak"));
   CHECK(std::wstring(adhan::ui::prayer(PRAYER_MAGHRIB)) == std::wstring(L"Ak\u015fam"));
+  CHECK(std::wstring(adhan::ui::duration_settings()) ==
+        std::wstring(L"Ezan S\u00fcrelerini Ayarla"));
+  CHECK(std::wstring(adhan::ui::duration_save()) == std::wstring(L"Kaydet"));
+  CHECK(std::wstring(adhan::ui::duration_cancel()) == std::wstring(L"\u0130ptal"));
+  CHECK(std::wstring(adhan::ui::threshold_option(30)) == std::wstring(L"30 saniye"));
+  CHECK(std::wstring(adhan::ui::threshold_option(60)) == std::wstring(L"1 dakika"));
+  CHECK(std::wstring(adhan::ui::threshold_option(120)) == std::wstring(L"2 dakika"));
   CHECK(std::wstring(adhan::ui::country("Turkey")) == std::wstring(L"T\u00fcrkiye"));
 }
 

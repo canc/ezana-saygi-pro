@@ -90,7 +90,16 @@ Scheduler::Scheduler(VolumeController* volume, Logger* logger, std::string state
   if (env && env[0] && env[0] != '0') debug_ = true;
 }
 
-void Scheduler::set_config(const AppConfig& cfg) { cfg_ = cfg; }
+void Scheduler::set_config(const AppConfig& cfg) {
+  cfg_ = cfg;
+  // Waiting events have not captured volume yet; pick up new duration/threshold.
+  // An already-running fade/mute keeps the times captured when it started.
+  if (has_active_ && !active_.captured && active_.state == ST_WAITING_FOR_THRESHOLD) {
+    PrayerId id = active_.prayer;
+    active_ = make_event(id);
+    has_active_ = true;
+  }
+}
 
 void Scheduler::set_schedule(const PrayerSchedule& s, bool valid) {
   has_schedule_ = valid && s.valid();
@@ -208,7 +217,7 @@ PrayerEvent Scheduler::make_event(PrayerId id) const {
   e.prayer = id;
   e.prayer_unix = p.unix_utc;
   e.threshold_seconds = cfg_.threshold_seconds;
-  e.adhan_duration_seconds = cfg_.adhan_duration_seconds;
+  e.adhan_duration_seconds = cfg_.adhan_duration_for(id);
   e.fade_duration_ms = cfg_.fade_duration_ms;
   e.original_volume = 0;
   e.original_mute = false;
@@ -216,7 +225,7 @@ PrayerEvent Scheduler::make_event(PrayerId id) const {
   e.state = ST_WAITING_FOR_THRESHOLD;
   e.fade_out_start_ms = (p.unix_utc - cfg_.threshold_seconds) * 1000LL;
   e.fade_out_end_ms = e.fade_out_start_ms + cfg_.fade_duration_ms;
-  e.fade_in_start_ms = (p.unix_utc + cfg_.adhan_duration_seconds) * 1000LL;
+  e.fade_in_start_ms = (p.unix_utc + e.adhan_duration_seconds) * 1000LL;
   e.fade_in_end_ms = e.fade_in_start_ms + cfg_.fade_duration_ms;
   return e;
 }
@@ -555,7 +564,7 @@ int64_t Scheduler::peek_next_fade_out_start_ms(int64_t now_ms) const {
     int64_t prayer_ms = schedule_.prayers[id].unix_utc * 1000LL;
     int64_t fade_out = (schedule_.prayers[id].unix_utc - cfg_.threshold_seconds) * 1000LL;
     int64_t fade_in_end =
-        (schedule_.prayers[id].unix_utc + cfg_.adhan_duration_seconds) * 1000LL +
+        (schedule_.prayers[id].unix_utc + cfg_.adhan_duration_for(id)) * 1000LL +
         cfg_.fade_duration_ms;
     (void)prayer_ms;
     if (now_ms >= fade_in_end) continue;

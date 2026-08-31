@@ -9,6 +9,7 @@
 #include <objbase.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -56,12 +57,13 @@ void set_text_w(HWND h, int id, const wchar_t* s) { SetDlgItemTextW(h, id, s ? s
 void set_text_w(HWND h, int id, const std::wstring& s) { SetDlgItemTextW(h, id, s.c_str()); }
 
 HFONT g_font = 0;
+HFONT g_font_bold = 0;
 
 HWND make_label(HWND parent, int id, const wchar_t* text, int x, int y, int w, int h, bool bold) {
   HWND hwnd = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE, x, y, w, h, parent,
                               (HMENU)(INT_PTR)id, 0, 0);
-  SendMessageW(hwnd, WM_SETFONT, (WPARAM)g_font, TRUE);
-  (void)bold;
+  HFONT f = (bold && g_font_bold) ? g_font_bold : g_font;
+  SendMessageW(hwnd, WM_SETFONT, (WPARAM)f, TRUE);
   return hwnd;
 }
 
@@ -207,11 +209,9 @@ void fill_locations(App* a) {
 void fill_threshold(App* a) {
   HWND combo = GetDlgItem(a->hwnd, IDC_THRESHOLD);
   SendMessageW(combo, CB_RESETCONTENT, 0, 0);
-  const wchar_t* labels[] = {ui::threshold_option(30), ui::threshold_option(60),
-                             ui::threshold_option(180), ui::threshold_option(300)};
   int sel = 1;
   for (int i = 0; i < kThresholdOptionCount; ++i) {
-    SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)labels[i]);
+    SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)ui::threshold_option(kThresholdOptions[i]));
     if (a->cfg.threshold_seconds == kThresholdOptions[i]) sel = i;
   }
   SendMessageW(combo, CB_SETCURSEL, sel, 0);
@@ -256,6 +256,152 @@ void on_threshold_sel(App* a) {
   persist_config(a);
   a->sched->set_config(a->cfg);
   a->sched->evaluate(SystemClock().now_ms());
+  refresh_ui(a);
+}
+
+const PrayerId kDurationPrayers[] = {PRAYER_FAJR, PRAYER_DHUHR, PRAYER_ASR, PRAYER_MAGHRIB,
+                                     PRAYER_ISHA};
+const int kDurationEditIds[] = {IDC_DUR_EDIT_FAJR, IDC_DUR_EDIT_DHUHR, IDC_DUR_EDIT_ASR,
+                                IDC_DUR_EDIT_MAGHRIB, IDC_DUR_EDIT_ISHA};
+
+struct DurationDialogState {
+  App* app;
+  HWND edits[5];
+  HWND err;
+};
+
+bool parse_minutes_edit(HWND edit, int* minutes) {
+  wchar_t buf[32];
+  GetWindowTextW(edit, buf, 32);
+  const wchar_t* p = buf;
+  while (*p == L' ' || *p == L'\t') ++p;
+  if (*p < L'0' || *p > L'9') return false;
+  wchar_t* end = 0;
+  long v = wcstol(p, &end, 10);
+  while (end && (*end == L' ' || *end == L'\t')) ++end;
+  if (!end || *end != 0) return false;
+  if (v < kAdhanDurationMinMinutes || v > kAdhanDurationMaxMinutes) return false;
+  *minutes = static_cast<int>(v);
+  return true;
+}
+
+LRESULT CALLBACK duration_dlg_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  DurationDialogState* st =
+      reinterpret_cast<DurationDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+  switch (msg) {
+    case WM_CREATE: {
+      CREATESTRUCTW* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+      st = reinterpret_cast<DurationDialogState*>(cs->lpCreateParams);
+      SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)st);
+      make_label(hwnd, 0, ui::duration_settings(), 16, 12, 360, 22, true);
+      int y = 48;
+      for (int i = 0; i < 5; ++i) {
+        make_label(hwnd, 0, ui::prayer(kDurationPrayers[i]), 16, y + 4, 90, 20, false);
+        HWND edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_NUMBER | ES_LEFT, 120, y,
+                                    56, 24, hwnd, (HMENU)(INT_PTR)kDurationEditIds[i], 0, 0);
+        SendMessageW(edit, WM_SETFONT, (WPARAM)g_font, TRUE);
+        SendMessageW(edit, EM_SETLIMITTEXT, 2, 0);
+        int secs = st->app->cfg.adhan_duration_for(kDurationPrayers[i]);
+        char tmp[8];
+        std::snprintf(tmp, sizeof(tmp), "%d", secs / 60);
+        SetWindowTextW(edit, to_wide(tmp).c_str());
+        st->edits[i] = edit;
+        make_label(hwnd, 0, ui::duration_minutes(), 186, y + 4, 80, 20, false);
+        y += 32;
+      }
+      st->err = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 16, y + 4, 360, 36, hwnd,
+                                (HMENU)(INT_PTR)IDC_DUR_ERROR, 0, 0);
+      SendMessageW(st->err, WM_SETFONT, (WPARAM)g_font, TRUE);
+      make_btn(hwnd, IDC_DUR_CANCEL, ui::duration_cancel(), 176, y + 44, 90, 28);
+      make_btn(hwnd, IDC_DUR_SAVE, ui::duration_save(), 276, y + 44, 90, 28);
+      return 0;
+    }
+    case WM_COMMAND: {
+      int id = LOWORD(wParam);
+      if (id == IDC_DUR_CANCEL || id == IDCANCEL) {
+        DestroyWindow(hwnd);
+        return 0;
+      }
+      if (id == IDC_DUR_SAVE || id == IDOK) {
+        if (!st || !st->app) return 0;
+        int minutes[5];
+        bool ok = true;
+        for (int i = 0; i < 5; ++i) {
+          if (!parse_minutes_edit(st->edits[i], &minutes[i])) {
+            ok = false;
+            break;
+          }
+        }
+        if (!ok) {
+          SetWindowTextW(st->err, ui::duration_invalid());
+          return 0;
+        }
+        for (int i = 0; i < 5; ++i) {
+          st->app->cfg.adhan_durations[kDurationPrayers[i]] = minutes[i] * 60;
+        }
+        persist_config(st->app);
+        st->app->sched->set_config(st->app->cfg);
+        st->app->sched->evaluate(SystemClock().now_ms());
+        if (st->app->log) st->app->log->info("Per-prayer Adhan durations saved");
+        DestroyWindow(hwnd);
+        return 0;
+      }
+      return 0;
+    }
+    case WM_CTLCOLORSTATIC: {
+      HDC dc = (HDC)wParam;
+      int id = GetDlgCtrlID((HWND)lParam);
+      SetBkMode(dc, TRANSPARENT);
+      if (id == IDC_DUR_ERROR) SetTextColor(dc, RGB(160, 32, 32));
+      return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+    }
+    case WM_CLOSE:
+      DestroyWindow(hwnd);
+      return 0;
+  }
+  return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+void open_duration_dialog(App* a) {
+  static bool registered = false;
+  if (!registered) {
+    WNDCLASSEXW wc;
+    ZeroMemory(&wc, sizeof(wc));
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = duration_dlg_proc;
+    wc.hInstance = a->inst;
+    wc.hCursor = LoadCursor(0, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"AdhanVolumeDurationDlg";
+    RegisterClassExW(&wc);
+    registered = true;
+  }
+  DurationDialogState st;
+  ZeroMemory(&st, sizeof(st));
+  st.app = a;
+  RECT pr;
+  GetWindowRect(a->hwnd, &pr);
+  int w = 400;
+  int h = 340;
+  int x = pr.left + ((pr.right - pr.left) - w) / 2;
+  int y = pr.top + ((pr.bottom - pr.top) - h) / 2;
+  HWND dlg =
+      CreateWindowExW(WS_EX_DLGMODALFRAME, L"AdhanVolumeDurationDlg", ui::duration_settings(),
+                      WS_CAPTION | WS_SYSMENU | WS_POPUP, x, y, w, h, a->hwnd, 0, a->inst, &st);
+  if (!dlg) return;
+  EnableWindow(a->hwnd, FALSE);
+  ShowWindow(dlg, SW_SHOW);
+  UpdateWindow(dlg);
+  MSG msg;
+  while (IsWindow(dlg) && GetMessageW(&msg, 0, 0, 0) > 0) {
+    if (!IsDialogMessageW(dlg, &msg)) {
+      TranslateMessage(&msg);
+      DispatchMessageW(&msg);
+    }
+  }
+  EnableWindow(a->hwnd, TRUE);
+  SetForegroundWindow(a->hwnd);
   refresh_ui(a);
 }
 
@@ -442,7 +588,7 @@ void add_tray(App* a) {
 void remove_tray(App* a) { Shell_NotifyIconW(NIM_DELETE, &a->nid); }
 
 void layout_window(HWND hwnd) {
-  make_label(hwnd, 0, ui::app_title(), 20, 16, 400, 24, true);
+  make_label(hwnd, IDC_TITLE, ui::app_title(), 20, 12, 440, 28, true);
   make_label(hwnd, 0, ui::status_label(), 20, 52, 120, 18, false);
   make_label(hwnd, IDC_STATUS, ui::active(), 20, 72, 400, 22, false);
 
@@ -456,6 +602,7 @@ void layout_window(HWND hwnd) {
 
   make_label(hwnd, 0, ui::threshold_label(), 20, 240, 280, 18, false);
   make_combo(hwnd, IDC_THRESHOLD, 20, 260, 200, 120);
+  make_btn(hwnd, IDC_DURATION, ui::duration_settings(), 230, 259, 220, 28);
 
   make_label(hwnd, 0, ui::next_prayer_label(), 20, 300, 200, 18, false);
   make_label(hwnd, IDC_NEXT_NAME, ui::em_dash(), 20, 322, 400, 22, false);
@@ -559,6 +706,7 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       if (id == IDC_TOGGLE) toggle_enabled(a);
       if (id == IDC_DETECT) detect_location(a);
       if (id == IDC_REFRESH) start_fetch(a, true);
+      if (id == IDC_DURATION) open_duration_dialog(a);
       if (id == ID_TRAY_OPEN) show_window(a);
       if (id == ID_TRAY_EXIT) exit_app(a);
       return 0;
@@ -608,6 +756,10 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       SetBkMode(dc, TRANSPARENT);
       int id = GetDlgCtrlID((HWND)lParam);
       if (id == IDC_STATUS && a && a->cfg.enabled) SetTextColor(dc, RGB(16, 120, 48));
+      if (id == IDC_TITLE) {
+        SetTextColor(dc, RGB(20, 20, 20));
+        SelectObject(dc, g_font_bold ? g_font_bold : g_font);
+      }
       return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
     }
     case WM_DESTROY:
@@ -636,6 +788,21 @@ int run(HINSTANCE inst, int show) {
   RegisterClassExW(&wc);
 
   g_font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+  {
+    LOGFONTW lf;
+    ZeroMemory(&lf, sizeof(lf));
+    if (GetObjectW(g_font, sizeof(lf), &lf) > 0) {
+      lf.lfWeight = FW_BOLD;
+      if (lf.lfHeight < 0)
+        lf.lfHeight -= 4;
+      else if (lf.lfHeight > 0)
+        lf.lfHeight += 4;
+      else
+        lf.lfHeight = -18;
+      g_font_bold = CreateFontIndirectW(&lf);
+    }
+    if (!g_font_bold) g_font_bold = g_font;
+  }
 
   App app;
   g_app = &app;
@@ -694,6 +861,8 @@ int run(HINSTANCE inst, int show) {
   delete app.http;
   delete app.log;
   g_app = 0;
+  if (g_font_bold && g_font_bold != g_font) DeleteObject(g_font_bold);
+  g_font_bold = 0;
   return (int)msg.wParam;
 }
 
@@ -720,7 +889,8 @@ int run_volume_test_ui() {
   bool ok = run_volume_self_test(vol, &log, &report);
   delete vol;
   std::wstring wreport = to_wide(report.empty() ? std::string(ok ? "OK" : "FAILED") : report);
-  MessageBoxW(0, wreport.c_str(), ok ? L"Ezan Sesi — volume test OK" : L"Ezan Sesi — volume test FAILED",
+  MessageBoxW(0, wreport.c_str(),
+              ok ? L"Ezana Sayg\u0131 PRO — volume test OK" : L"Ezana Sayg\u0131 PRO — volume test FAILED",
               MB_OK | (ok ? MB_ICONINFORMATION : MB_ICONERROR));
   if (SUCCEEDED(hr)) CoUninitialize();
   return ok ? 0 : 1;

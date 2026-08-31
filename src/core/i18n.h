@@ -42,6 +42,11 @@ const wchar_t* status_muted();
 const wchar_t* status_fading_in();
 const wchar_t* status_no_remaining();
 const wchar_t* em_dash();
+const wchar_t* duration_settings();
+const wchar_t* duration_save();
+const wchar_t* duration_cancel();
+const wchar_t* duration_minutes();
+const wchar_t* duration_invalid();
 
 std::wstring location_item(const char* city, const char* country_en);
 std::wstring timezone_text(const std::string& iana, int64_t unix_utc);

@@ -5,10 +5,32 @@
 #include "locations.h"
 
 namespace adhan {
+namespace {
+
+int read_duration_field(const Json& durs, const char* key, const char* alt, int fallback) {
+  int raw = 0;
+  bool present = false;
+  if (durs.has(key) && durs.get(key).is_number()) {
+    raw = durs.get(key).as_int(0);
+    present = true;
+  } else if (alt && durs.has(alt) && durs.get(alt).is_number()) {
+    raw = durs.get(alt).as_int(0);
+    present = true;
+  }
+  if (!present) return fallback;
+  if (!valid_adhan_duration_seconds(raw)) {
+    int clamped = clamp_adhan_duration_seconds(raw);
+    if (valid_adhan_duration_seconds(clamped)) return clamped;
+    return fallback;
+  }
+  return raw;
+}
+
+}  // namespace
 
 std::string config_to_json(const AppConfig& cfg) {
   Json j = Json::object();
-  j["version"] = Json::number(cfg.version);
+  j["version"] = Json::number(kConfigVersion);
   j["enabled"] = Json::boolean(cfg.enabled);
   j["country"] = Json::string(cfg.country);
   j["city"] = Json::string(cfg.city);
@@ -16,7 +38,13 @@ std::string config_to_json(const AppConfig& cfg) {
   j["longitude"] = Json::number(cfg.longitude);
   j["timezone"] = Json::string(cfg.timezone);
   j["threshold_seconds"] = Json::number(cfg.threshold_seconds);
-  j["adhan_duration_seconds"] = Json::number(cfg.adhan_duration_seconds);
+  Json durs = Json::object();
+  durs["imsak"] = Json::number(cfg.adhan_duration_for(PRAYER_FAJR));
+  durs["dhuhr"] = Json::number(cfg.adhan_duration_for(PRAYER_DHUHR));
+  durs["asr"] = Json::number(cfg.adhan_duration_for(PRAYER_ASR));
+  durs["maghrib"] = Json::number(cfg.adhan_duration_for(PRAYER_MAGHRIB));
+  durs["isha"] = Json::number(cfg.adhan_duration_for(PRAYER_ISHA));
+  j["adhan_durations"] = durs;
   j["fade_duration_ms"] = Json::number(cfg.fade_duration_ms);
   j["aladhan_endpoint"] = Json::string(cfg.aladhan_endpoint);
   j["islamicfinder_endpoint"] = Json::string(cfg.islamicfinder_endpoint);
@@ -40,8 +68,6 @@ bool config_from_json(const std::string& text, AppConfig* out, std::string* err)
   if (j.has("longitude")) c.longitude = j.get("longitude").as_number(kDefaultLongitude);
   if (j.has("timezone")) c.timezone = j.get("timezone").as_string(kDefaultTimezone);
   if (j.has("threshold_seconds")) c.threshold_seconds = j.get("threshold_seconds").as_int(60);
-  if (j.has("adhan_duration_seconds"))
-    c.adhan_duration_seconds = j.get("adhan_duration_seconds").as_int(DEFAULT_ADHAN_DURATION_SECONDS);
   if (j.has("fade_duration_ms"))
     c.fade_duration_ms = j.get("fade_duration_ms").as_int(DEFAULT_FADE_DURATION_MS);
   if (j.has("aladhan_endpoint"))
@@ -51,12 +77,43 @@ bool config_from_json(const std::string& text, AppConfig* out, std::string* err)
         j.get("islamicfinder_endpoint").as_string(kDefaultIslamicFinderEndpoint);
   if (j.has("http_timeout_ms")) c.http_timeout_ms = j.get("http_timeout_ms").as_int(kHttpTimeoutMs);
 
+  int legacy = 0;
+  bool has_legacy = false;
+  if (j.has("adhan_duration_seconds") && j.get("adhan_duration_seconds").is_number()) {
+    legacy = j.get("adhan_duration_seconds").as_int(0);
+    has_legacy = valid_adhan_duration_seconds(legacy) ||
+                 valid_adhan_duration_seconds(clamp_adhan_duration_seconds(legacy));
+    if (has_legacy && !valid_adhan_duration_seconds(legacy))
+      legacy = clamp_adhan_duration_seconds(legacy);
+    c.adhan_duration_seconds = has_legacy ? legacy : DEFAULT_ADHAN_DURATION_SECONDS;
+  }
+
+  const bool has_durs = j.has("adhan_durations") && j.get("adhan_durations").is_object();
+  if (has_durs) {
+    const Json& d = j.get("adhan_durations");
+    c.adhan_durations[PRAYER_FAJR] =
+        read_duration_field(d, "imsak", "fajr", default_adhan_duration_seconds(PRAYER_FAJR));
+    c.adhan_durations[PRAYER_DHUHR] =
+        read_duration_field(d, "dhuhr", "zuhr", default_adhan_duration_seconds(PRAYER_DHUHR));
+    c.adhan_durations[PRAYER_ASR] =
+        read_duration_field(d, "asr", 0, default_adhan_duration_seconds(PRAYER_ASR));
+    c.adhan_durations[PRAYER_MAGHRIB] =
+        read_duration_field(d, "maghrib", 0, default_adhan_duration_seconds(PRAYER_MAGHRIB));
+    c.adhan_durations[PRAYER_ISHA] =
+        read_duration_field(d, "isha", 0, default_adhan_duration_seconds(PRAYER_ISHA));
+  } else if (has_legacy) {
+    c.adhan_durations[PRAYER_FAJR] = legacy;
+    c.adhan_durations[PRAYER_DHUHR] = legacy;
+    c.adhan_durations[PRAYER_ASR] = legacy;
+    c.adhan_durations[PRAYER_MAGHRIB] = legacy;
+    c.adhan_durations[PRAYER_ISHA] = legacy;
+  }
+
   bool ok_threshold = false;
   for (int i = 0; i < kThresholdOptionCount; ++i) {
     if (c.threshold_seconds == kThresholdOptions[i]) ok_threshold = true;
   }
   if (!ok_threshold) c.threshold_seconds = DEFAULT_THRESHOLD_SECONDS;
-  if (c.adhan_duration_seconds < 30) c.adhan_duration_seconds = DEFAULT_ADHAN_DURATION_SECONDS;
   if (c.fade_duration_ms < 500) c.fade_duration_ms = DEFAULT_FADE_DURATION_MS;
   if (c.timezone.empty()) c.timezone = kDefaultTimezone;
   if (!c.location().valid()) {

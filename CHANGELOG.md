@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.3 — 2026-08-31
+
+- Visible product name is **Ezana Saygı PRO** (bold in the main window).
+- Per-prayer Adhan durations with defaults: İmsak 5 dk, Öğle 5 dk, İkindi 3 dk, Akşam 3 dk, Yatsı 7 dk. **Ezan Sürelerini Ayarla** opens a popup (İptal / Kaydet).
+- Threshold choices are 30 saniye, 1 dakika, and 2 dakika.
+- Existing `adhan_duration_seconds` configs migrate; new files store `adhan_durations` only.
+
 ## 1.0.2 — 2026-08-31
 
 - Scheduler no longer sleeps until the next prayer: it reevaluates wall-clock time on an adaptive poll (about 1s when an event is near, 5s when soon, 15s when idle) and on `WM_TIMECHANGE`.
