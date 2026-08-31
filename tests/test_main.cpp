@@ -10,6 +10,7 @@
 #include "core/config.h"
 #include "core/fade.h"
 #include "core/fsutil.h"
+#include "core/i18n.h"
 #include "core/json.h"
 #include "core/locations.h"
 #include "core/logger.h"
@@ -562,7 +563,19 @@ static void test_cache_key() {
   CHECK(CacheManager::make_cache_key(loc2, d) == key);
 }
 
+static void test_i18n_turkish_default() {
+  CHECK(adhan::ui::language() == adhan::ui::LANG_TR);
+  CHECK(std::wstring(adhan::ui::tray_show()) == std::wstring(L"G\u00f6ster"));
+  CHECK(std::wstring(adhan::ui::tray_exit()) == std::wstring(L"Kapat"));
+  CHECK(std::wstring(adhan::ui::active()) == std::wstring(L"Aktif"));
+  CHECK(std::wstring(adhan::ui::inactive()) == std::wstring(L"Pasif"));
+  CHECK(std::wstring(adhan::ui::location_label()) == std::wstring(L"Konum"));
+  CHECK(std::wstring(adhan::ui::prayer(PRAYER_MAGHRIB)) == std::wstring(L"Ak\u015fam"));
+  CHECK(std::wstring(adhan::ui::country("Turkey")) == std::wstring(L"T\u00fcrkiye"));
+}
+
 int main() {
+  test_i18n_turkish_default();
   test_timezone();
   test_fade();
   test_aladhan_parse();

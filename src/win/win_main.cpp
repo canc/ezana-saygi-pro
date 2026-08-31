@@ -17,6 +17,7 @@
 #include "core/config.h"
 #include "core/constants.h"
 #include "core/fsutil.h"
+#include "core/i18n.h"
 #include "core/locations.h"
 #include "core/logger.h"
 #include "core/provider.h"
@@ -48,6 +49,10 @@ std::string to_utf8(const std::wstring& w) {
 void set_text(HWND h, int id, const std::string& s) {
   SetDlgItemTextW(h, id, to_wide(s).c_str());
 }
+
+void set_text_w(HWND h, int id, const wchar_t* s) { SetDlgItemTextW(h, id, s ? s : L""); }
+
+void set_text_w(HWND h, int id, const std::wstring& s) { SetDlgItemTextW(h, id, s.c_str()); }
 
 HFONT g_font = 0;
 
@@ -114,16 +119,16 @@ void balloon(App* a, const wchar_t* title, const wchar_t* msg) {
 }
 
 void update_tray_tip(App* a) {
-  std::string tip = "Adhan Volume";
+  const wchar_t* next = 0;
+  PrayerId id;
   if (a->sched) {
     const SchedulerStatus& st = a->sched->status();
-    if (!st.next_prayer_name.empty()) {
-      tip += " - ";
-      tip += st.next_prayer_name;
+    if (!st.next_prayer_name.empty() && prayer_id_from_name(st.next_prayer_name, &id)) {
+      next = ui::prayer(id);
     }
-    tip += a->cfg.enabled ? " (On)" : " (Off)";
   }
-  lstrcpynW(a->nid.szTip, to_wide(tip).c_str(), ARRAYSIZE(a->nid.szTip));
+  std::wstring tip = ui::tray_tip(next, a->cfg.enabled);
+  lstrcpynW(a->nid.szTip, tip.c_str(), ARRAYSIZE(a->nid.szTip));
   a->nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
   Shell_NotifyIconW(NIM_MODIFY, &a->nid);
 }
@@ -190,8 +195,8 @@ void fill_locations(App* a) {
   int sel = 0;
   for (size_t i = 0; i < n; ++i) {
     a->cities.push_back(&table[i]);
-    std::string label = std::string(table[i].city) + ", " + table[i].country;
-    SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)to_wide(label).c_str());
+    std::wstring label = ui::location_item(table[i].city, table[i].country);
+    SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)label.c_str());
     if (a->cfg.city == table[i].city && a->cfg.country == table[i].country) sel = (int)i;
   }
   SendMessageW(combo, CB_SETCURSEL, sel, 0);
@@ -200,7 +205,8 @@ void fill_locations(App* a) {
 void fill_threshold(App* a) {
   HWND combo = GetDlgItem(a->hwnd, IDC_THRESHOLD);
   SendMessageW(combo, CB_RESETCONTENT, 0, 0);
-  const wchar_t* labels[] = {L"30 seconds", L"1 minute", L"3 minutes", L"5 minutes"};
+  const wchar_t* labels[] = {ui::threshold_option(30), ui::threshold_option(60),
+                             ui::threshold_option(180), ui::threshold_option(300)};
   int sel = 1;
   for (int i = 0; i < kThresholdOptionCount; ++i) {
     SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)labels[i]);
@@ -263,9 +269,7 @@ void toggle_enabled(App* a) {
 void detect_location(App* a) {
   GEOID id = GetUserGeoID(GEOCLASS_NATION);
   if (id == GEOID_NOT_AVAILABLE) {
-    MessageBoxW(a->hwnd,
-                L"Automatic location is not available. Please select your city from the list.",
-                L"Adhan Volume", MB_OK | MB_ICONINFORMATION);
+    MessageBoxW(a->hwnd, ui::err_geo_unavailable(), ui::app_title(), MB_OK | MB_ICONINFORMATION);
     return;
   }
   wchar_t iso[8];
@@ -273,20 +277,18 @@ void detect_location(App* a) {
   GetGeoInfoW(id, GEO_ISO2, iso, 8, 0);
   std::string country = iso2_to_country(to_utf8(iso));
   if (country.empty()) {
-    MessageBoxW(a->hwnd, L"Could not map this PC's country. Please select a city manually.",
-                L"Adhan Volume", MB_OK | MB_ICONINFORMATION);
+    MessageBoxW(a->hwnd, ui::err_geo_unmapped(), ui::app_title(), MB_OK | MB_ICONINFORMATION);
     return;
   }
   std::vector<const CityInfo*> list = cities_in_country(country);
   if (list.empty()) {
-    MessageBoxW(a->hwnd, L"No cities are bundled for this country. Select a city manually.",
-                L"Adhan Volume", MB_OK | MB_ICONINFORMATION);
+    MessageBoxW(a->hwnd, ui::err_geo_no_cities(), ui::app_title(), MB_OK | MB_ICONINFORMATION);
     return;
   }
   const CityInfo* pick = list[0];
   if (country == a->cfg.country) {
     fill_locations(a);
-    balloon(a, L"Adhan Volume", L"Country already matches this PC.");
+    balloon(a, ui::app_title(), ui::note_geo_same_country());
     return;
   }
   // Prefer a well-known default city when switching country.
@@ -318,29 +320,51 @@ void detect_location(App* a) {
 void refresh_ui(App* a) {
   if (!a->hwnd) return;
   const SchedulerStatus& st = a->sched->status();
-  std::string status = a->cfg.enabled ? "Enabled" : "Disabled";
-  if (a->fetching) status += "  (updating...)";
-  else if (!st.has_schedule) status += "  (no schedule)";
-  else if (st.state == ST_FADING_OUT) status += "  (fading out)";
-  else if (st.state == ST_MUTED) status += "  (volume held at 0)";
-  else if (st.state == ST_FADING_IN) status += "  (restoring volume)";
-  set_text(a->hwnd, IDC_STATUS, std::string(a->cfg.enabled ? "\xE2\x97\x8F " : "\xE2\x97\x8B ") + status);
+  std::wstring status = a->cfg.enabled ? ui::active() : ui::inactive();
+  if (a->fetching) {
+    status += L"  (";
+    status += ui::status_updating();
+    status += L")";
+  } else if (!st.has_schedule) {
+    status += L"  (";
+    status += ui::status_no_schedule();
+    status += L")";
+  } else if (st.state == ST_FADING_OUT) {
+    status += L"  (";
+    status += ui::status_fading_out();
+    status += L")";
+  } else if (st.state == ST_MUTED) {
+    status += L"  (";
+    status += ui::status_muted();
+    status += L")";
+  } else if (st.state == ST_FADING_IN) {
+    status += L"  (";
+    status += ui::status_fading_in();
+    status += L")";
+  }
+  std::wstring status_line = a->cfg.enabled ? L"\u25CF " : L"\u25CB ";
+  status_line += status;
+  set_text_w(a->hwnd, IDC_STATUS, status_line);
 
   int64_t now = SystemClock().now_unix();
-  set_text(a->hwnd, IDC_TIMEZONE, timezone_display(a->cfg.timezone, now));
+  set_text_w(a->hwnd, IDC_TIMEZONE, ui::timezone_text(a->cfg.timezone, now));
 
   char coords[80];
   std::snprintf(coords, sizeof(coords), "%.4f, %.4f", a->cfg.latitude, a->cfg.longitude);
   set_text(a->hwnd, IDC_COORDS, coords);
 
-  if (!st.next_prayer_name.empty()) {
-    set_text(a->hwnd, IDC_NEXT_NAME, st.next_prayer_name);
+  PrayerId pid;
+  if (!st.next_prayer_name.empty() && prayer_id_from_name(st.next_prayer_name, &pid)) {
+    set_text_w(a->hwnd, IDC_NEXT_NAME, ui::prayer(pid));
     set_text(a->hwnd, IDC_NEXT_TIME, format_prayer_time(a, st.next_prayer_unix));
+  } else if (!st.has_schedule) {
+    set_text_w(a->hwnd, IDC_NEXT_NAME, ui::status_no_schedule());
+    set_text_w(a->hwnd, IDC_NEXT_TIME, L"");
   } else {
-    set_text(a->hwnd, IDC_NEXT_NAME, st.message.empty() ? "—" : st.message);
-    set_text(a->hwnd, IDC_NEXT_TIME, "");
+    set_text_w(a->hwnd, IDC_NEXT_NAME, ui::status_no_remaining());
+    set_text_w(a->hwnd, IDC_NEXT_TIME, L"");
   }
-  SetDlgItemTextW(a->hwnd, IDC_TOGGLE, a->cfg.enabled ? L"ON" : L"OFF");
+  SetDlgItemTextW(a->hwnd, IDC_TOGGLE, a->cfg.enabled ? ui::active() : ui::inactive());
   update_tray_tip(a);
   update_fade_timers(a);
 }
@@ -372,30 +396,25 @@ void tick_scheduler(App* a) {
 }
 
 void show_window(App* a) {
-  ShowWindow(a->hwnd, SW_SHOW);
+  if (!a || !a->hwnd) return;
+  if (IsIconic(a->hwnd))
+    ShowWindow(a->hwnd, SW_RESTORE);
+  else
+    ShowWindow(a->hwnd, SW_SHOW);
+  SetWindowPos(a->hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
   SetForegroundWindow(a->hwnd);
+  SetActiveWindow(a->hwnd);
+  SetFocus(a->hwnd);
 }
 
 void tray_menu(App* a) {
   POINT pt;
   GetCursorPos(&pt);
   HMENU m = CreatePopupMenu();
-  AppendMenuW(m, MF_STRING, ID_TRAY_OPEN, L"Open");
-  AppendMenuW(m, MF_STRING, ID_TRAY_TOGGLE, a->cfg.enabled ? L"Disable" : L"Enable");
-  std::wstring next = L"Next Prayer";
-  const SchedulerStatus& st = a->sched->status();
-  if (!st.next_prayer_name.empty()) {
-    next += L": ";
-    next += to_wide(st.next_prayer_name);
-    next += L" ";
-    next += to_wide(format_prayer_time(a, st.next_prayer_unix));
-  }
-  AppendMenuW(m, MF_STRING | MF_DISABLED, ID_TRAY_NEXT, next.c_str());
-  AppendMenuW(m, MF_STRING, ID_TRAY_REFRESH, L"Refresh Prayer Times");
-  AppendMenuW(m, MF_SEPARATOR, 0, 0);
-  AppendMenuW(m, MF_STRING, ID_TRAY_EXIT, L"Exit");
+  AppendMenuW(m, MF_STRING, ID_TRAY_OPEN, ui::tray_show());
+  AppendMenuW(m, MF_STRING, ID_TRAY_EXIT, ui::tray_exit());
   SetForegroundWindow(a->hwnd);
-  TrackPopupMenu(m, TPM_RIGHTBUTTON, pt.x, pt.y, 0, a->hwnd, 0);
+  TrackPopupMenu(m, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, pt.x, pt.y, 0, a->hwnd, 0);
   DestroyMenu(m);
 }
 
@@ -408,7 +427,7 @@ void add_tray(App* a) {
   a->nid.uCallbackMessage = WM_TRAYICON;
   a->nid.hIcon = LoadIconW(a->inst, MAKEINTRESOURCEW(IDI_APPICON));
   if (!a->nid.hIcon) a->nid.hIcon = LoadIconW(0, IDI_APPLICATION);
-  lstrcpynW(a->nid.szTip, L"Adhan Volume", ARRAYSIZE(a->nid.szTip));
+  lstrcpynW(a->nid.szTip, ui::app_title(), ARRAYSIZE(a->nid.szTip));
   Shell_NotifyIconW(NIM_ADD, &a->nid);
   a->nid.uVersion = NOTIFYICON_VERSION;
   Shell_NotifyIconW(NIM_SETVERSION, &a->nid);
@@ -417,27 +436,28 @@ void add_tray(App* a) {
 void remove_tray(App* a) { Shell_NotifyIconW(NIM_DELETE, &a->nid); }
 
 void layout_window(HWND hwnd) {
-  make_label(hwnd, 0, L"Adhan Volume", 20, 16, 400, 24, true);
-  make_label(hwnd, 0, L"Status", 20, 52, 120, 18, false);
-  make_label(hwnd, IDC_STATUS, L"Enabled", 20, 72, 400, 22, false);
+  make_label(hwnd, 0, ui::app_title(), 20, 16, 400, 24, true);
+  make_label(hwnd, 0, ui::status_label(), 20, 52, 120, 18, false);
+  make_label(hwnd, IDC_STATUS, ui::active(), 20, 72, 400, 22, false);
 
-  make_label(hwnd, 0, L"Location", 20, 108, 200, 18, false);
+  make_label(hwnd, 0, ui::location_label(), 20, 108, 200, 18, false);
   make_combo(hwnd, IDC_LOCATION, 20, 128, 300, 220);
-  make_btn(hwnd, IDC_DETECT, L"Detect Location", 330, 127, 110, 26);
+  make_btn(hwnd, IDC_DETECT, ui::detect_location(), 330, 127, 120, 26);
   make_label(hwnd, IDC_COORDS, L"", 20, 160, 400, 18, false);
 
-  make_label(hwnd, 0, L"Timezone", 20, 188, 200, 18, false);
-  make_label(hwnd, IDC_TIMEZONE, L"Europe/Istanbul (GMT+3)", 20, 208, 400, 20, false);
+  make_label(hwnd, 0, ui::timezone_label(), 20, 188, 200, 18, false);
+  make_label(hwnd, IDC_TIMEZONE, L"", 20, 208, 400, 20, false);
 
-  make_label(hwnd, 0, L"Threshold", 20, 240, 200, 18, false);
+  make_label(hwnd, 0, ui::threshold_label(), 20, 240, 280, 18, false);
   make_combo(hwnd, IDC_THRESHOLD, 20, 260, 200, 120);
 
-  make_label(hwnd, 0, L"Next Prayer", 20, 300, 200, 18, false);
-  make_label(hwnd, IDC_NEXT_NAME, L"—", 20, 322, 400, 22, false);
+  make_label(hwnd, 0, ui::next_prayer_label(), 20, 300, 200, 18, false);
+  make_label(hwnd, IDC_NEXT_NAME, ui::em_dash(), 20, 322, 400, 22, false);
   make_label(hwnd, IDC_NEXT_TIME, L"", 20, 346, 400, 22, false);
 
-  make_btn(hwnd, IDC_TOGGLE, L"ON", 20, 390, 120, 36);
-  make_label(hwnd, IDC_HINT, L"Closing this window hides it to the tray.", 20, 440, 400, 18, false);
+  make_btn(hwnd, IDC_TOGGLE, ui::active(), 20, 390, 120, 36);
+  make_btn(hwnd, IDC_REFRESH, ui::refresh_times(), 150, 390, 160, 36);
+  make_label(hwnd, IDC_HINT, ui::close_hint(), 20, 440, 430, 36, false);
 }
 
 void on_create(HWND hwnd, App* a) {
@@ -476,13 +496,13 @@ void on_fetch_done(App* a, FetchResultMsg* msg) {
     if (a->log) a->log->info("Prayer schedule updated");
     if (msg->force || (!msg->result.used_cache && msg->result.did_api_request)) {
       if (!a->shown_schedule_balloon || msg->force) {
-        balloon(a, L"Adhan Volume", L"Prayer schedule updated.");
+        balloon(a, ui::app_title(), ui::note_schedule_updated());
         a->shown_schedule_balloon = true;
       }
     }
   } else {
     if (a->log) a->log->error(std::string("No schedule: ") + msg->result.error);
-    set_text(a->hwnd, IDC_HINT, "Could not load prayer times. Cached data will be used when available.");
+    set_text_w(a->hwnd, IDC_HINT, ui::err_schedule_unavailable());
   }
   delete msg;
   refresh_ui(a);
@@ -518,9 +538,8 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       if (id == IDC_THRESHOLD && code == CBN_SELCHANGE) on_threshold_sel(a);
       if (id == IDC_TOGGLE) toggle_enabled(a);
       if (id == IDC_DETECT) detect_location(a);
+      if (id == IDC_REFRESH) start_fetch(a, true);
       if (id == ID_TRAY_OPEN) show_window(a);
-      if (id == ID_TRAY_TOGGLE) toggle_enabled(a);
-      if (id == ID_TRAY_REFRESH) start_fetch(a, true);
       if (id == ID_TRAY_EXIT) exit_app(a);
       return 0;
     }
@@ -530,13 +549,22 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_FETCH_DONE:
       on_fetch_done(a, reinterpret_cast<FetchResultMsg*>(lParam));
       return 0;
+    case WM_SHOW_MAIN:
+      show_window(a);
+      return 0;
     case WM_TRAYICON:
-      if (lParam == WM_LBUTTONDBLCLK || lParam == WM_LBUTTONUP) show_window(a);
+      if (lParam == WM_LBUTTONDBLCLK) show_window(a);
       if (lParam == WM_RBUTTONUP || lParam == WM_CONTEXTMENU) tray_menu(a);
       return 0;
     case WM_CLOSE:
       ShowWindow(hwnd, SW_HIDE);
       return 0;
+    case WM_SYSCOMMAND:
+      if ((wParam & 0xFFF0) == SC_MINIMIZE || (wParam & 0xFFF0) == SC_CLOSE) {
+        ShowWindow(hwnd, SW_HIDE);
+        return 0;
+      }
+      break;
     case WM_POWERBROADCAST:
       if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND ||
           wParam == PBT_APMRESUMECRITICAL) {
@@ -623,9 +651,9 @@ int run(HINSTANCE inst, int show) {
   app.cache->set_max_retries(kHttpMaxRetries);
   app.sched = new Scheduler(app.vol, app.log, app.root);
 
-  HWND hwnd = CreateWindowExW(0, L"AdhanVolumeMainWnd", L"Adhan Volume",
+  HWND hwnd = CreateWindowExW(0, L"AdhanVolumeMainWnd", ui::app_title(),
                               WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                              CW_USEDEFAULT, CW_USEDEFAULT, 470, 520, 0, 0, inst, 0);
+                              CW_USEDEFAULT, CW_USEDEFAULT, 480, 530, 0, 0, inst, 0);
   if (!hwnd) return 1;
   ShowWindow(hwnd, show);
   UpdateWindow(hwnd);
@@ -656,6 +684,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
     HWND existing = FindWindowW(L"AdhanVolumeMainWnd", 0);
     if (existing) {
+      PostMessageW(existing, WM_SHOW_MAIN, 0, 0);
+      AllowSetForegroundWindow(ASFW_ANY);
       ShowWindow(existing, SW_SHOW);
       SetForegroundWindow(existing);
     }

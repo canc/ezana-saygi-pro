@@ -31,7 +31,8 @@ CORE_SRCS := \
 	src/core/provider.cpp \
 	src/core/cache_manager.cpp \
 	src/core/fade.cpp \
-	src/core/scheduler.cpp
+	src/core/scheduler.cpp \
+	src/core/i18n.cpp
 
 WIN_SRCS := \
 	src/win/win_http.cpp \

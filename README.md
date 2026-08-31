@@ -29,10 +29,12 @@ logs\
 
 ## First launch
 
-1. Confirm **Location** (default: Antalya, Turkey).
-2. Confirm **Timezone** shows `Europe/Istanbul (GMT+3)` for Türkiye.
-3. Set **Threshold** (how long before prayer the fade starts): 30 seconds, 1 minute, 3 minutes, or 5 minutes. Default is **1 minute**.
-4. Use **ON / OFF** to enable or disable automatic fading. Scheduling only runs while the process is running (including when hidden in the tray).
+The window is in **Turkish** by default.
+
+1. Confirm **Konum** (default: Antalya, Türkiye).
+2. Confirm **Zaman Dilimi** shows `Avrupa/İstanbul (GMT+3)`.
+3. Set **Ezan Vaktinden Önce**: 30 saniye, 1 dakika, 3 dakika, or 5 dakika. Default is **1 dakika**.
+4. Use **Aktif / Pasif** to enable or disable automatic fading. Scheduling continues while the process is in the tray.
 
 The app does **not** add itself to Windows startup.
 
@@ -40,7 +42,7 @@ The app does **not** add itself to Windows startup.
 
 Pick a city from the list. Latitude/longitude are filled in automatically.
 
-**Detect Location** uses the Windows country setting only (no browser/WebView). It never requires a location permission prompt. You can always choose a city by hand.
+**Konumu Bul** uses the Windows country setting only (no browser/WebView). It never requires a location permission prompt. You can always choose a city by hand.
 
 ## Threshold and Adhan window
 
@@ -61,11 +63,12 @@ The Adhan hold duration is an internal setting (`adhan_duration_seconds`, defaul
 
 ## Enable / disable and tray
 
-- **ON / OFF** in the window enables or disables fading.
-- Closing the window **hides** it. The app keeps running in the system tray.
-- Tray menu: Open, Enable/Disable, Next Prayer, Refresh Prayer Times, Exit.
-- Double-click the tray icon to open the window.
-- **Exit** is the only way to fully quit. On exit, an in-progress fade is restored so volume is not left at 0.
+- **Aktif / Pasif** in the window enables or disables fading.
+- Closing the window (X) **hides** it. The app keeps running in the system tray. No confirmation dialog.
+- Tray menu is only **Göster** (show window) and **Kapat** (quit).
+- Double-click the tray icon to show and focus the window (same as Göster).
+- **Kapat** is the only way to fully quit. On exit, an in-progress fade is restored so volume is not left at 0.
+- **Vakitleri Yenile** in the main window fetches times again.
 
 ## Prayer times API and cache
 
@@ -80,7 +83,7 @@ Normal API contact:
 1. First launch (or today’s cache missing/invalid)
 2. Daily cache **check** at **03:10 Europe/Istanbul** — fetches only if today’s cache is missing
 3. Location/timezone change when that location has no cache for today
-4. Manual **Refresh Prayer Times**
+4. Manual **Vakitleri Yenile** in the main window
 
 Restarting the same day with a valid cache performs **zero** API requests.
 
@@ -98,8 +101,8 @@ Logs: `%APPDATA%\AdhanVolume\logs\adhanvolume.log` (rotated, size-limited).
 
 | Problem | What to check |
 |---------|----------------|
-| Volume never fades | App must be **ON**, in the tray (not Exited), and a valid schedule must be loaded. |
-| Wrong prayer times | Confirm city and that timezone is Europe/Istanbul for Türkiye. Use Refresh Prayer Times. |
+| Volume never fades | App must be **Aktif**, in the tray (not closed with **Kapat**), and a valid schedule must be loaded. |
+| Wrong prayer times | Confirm city and that timezone is Avrupa/İstanbul (GMT+3) for Türkiye. Use **Vakitleri Yenile**. |
 | Windows 7 TLS/HTTPS errors | Install Windows 7 updates that enable TLS 1.2 and modern root certificates. |
 | Volume stuck at 0 after a crash | Restart the app once; it restores the captured volume when the unfinished event has ended, unless you already changed the volume yourself. |
 | Two copies running | Only one instance is allowed; launching again focuses the existing window. |

@@ -13,12 +13,12 @@ FILETYPE 0x1
   {
     BLOCK "040904b0"
     {
-      VALUE "CompanyName", "Adhan Volume"
-      VALUE "FileDescription", "Fade system volume around prayer times"
+      VALUE "CompanyName", "Ezan Sesi"
+      VALUE "FileDescription", "Ezan vakitlerinde sistem sesini kisar"
       VALUE "FileVersion", "1.0.0"
       VALUE "InternalName", "AdhanVolume"
       VALUE "OriginalFilename", "AdhanVolume.exe"
-      VALUE "ProductName", "Adhan Volume"
+      VALUE "ProductName", "Ezan Sesi"
       VALUE "ProductVersion", "1.0.0"
     }
   }
