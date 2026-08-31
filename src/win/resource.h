@@ -1,0 +1,28 @@
+#pragma once
+
+#define IDI_APPICON 101
+
+#define ID_TRAY_OPEN 40001
+#define ID_TRAY_TOGGLE 40002
+#define ID_TRAY_NEXT 40003
+#define ID_TRAY_REFRESH 40004
+#define ID_TRAY_EXIT 40005
+
+#define IDC_STATUS 2001
+#define IDC_LOCATION 2002
+#define IDC_TIMEZONE 2003
+#define IDC_THRESHOLD 2004
+#define IDC_NEXT_NAME 2005
+#define IDC_NEXT_TIME 2006
+#define IDC_TOGGLE 2007
+#define IDC_DETECT 2008
+#define IDC_COORDS 2009
+#define IDC_HINT 2010
+
+#define WM_TRAYICON (WM_APP + 1)
+#define WM_FETCH_DONE (WM_APP + 2)
+#define WM_RESUME_WORK (WM_APP + 3)
+
+#define IDT_SCHEDULER 1
+#define IDT_FADE 2
+#define IDT_MUTE 3

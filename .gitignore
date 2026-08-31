@@ -1,0 +1,8 @@
+build/
+dist/
+*.o
+*.res
+.vs/
+*.user
+*.log
+.DS_Store
