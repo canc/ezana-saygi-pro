@@ -29,7 +29,7 @@ Application (Win32 UI thread + one HTTP worker)
 │
 ├── UI
 │   ├── Main window (status, location, timezone, threshold, next prayer, ON/OFF)
-│   └── TrayManager (hide-on-close, Open / Enable / Next / Refresh / Exit)
+│   └── TrayManager (hide-on-close, Göster / Kapat)
 │
 ├── Core
 │   ├── TimezoneService     Europe/Istanbul = GMT+3 (not Windows TZ)

@@ -1,5 +1,6 @@
 build/
-dist/
+dist/*
+!dist/AdhanVolume.exe
 *.o
 *.res
 .vs/

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1 — 2026-08-31
+
+- Turkish as the default UI language (window, buttons, tray, errors, notifications).
+- Tray menu reduced to **Göster** and **Kapat**.
+- Close (X) hides to tray with no confirmation; only **Kapat** exits.
+- Double-click tray icon shows and focuses the main window.
+- Release binary committed at `dist/AdhanVolume.exe`.
+
 ## 1.0.0 — 2026-08-31
 
 - Initial native Win32 application `AdhanVolume.exe` (Windows 7–11, static MinGW build).
