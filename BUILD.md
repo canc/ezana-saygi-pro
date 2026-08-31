@@ -2,7 +2,9 @@
 
 The release artifact is a **standalone** `AdhanVolume.exe`. Users do not install a compiler, runtime, or redistributable.
 
-Windows 10 is the primary target. The same binary is intended for Windows 7, 8, 8.1, and 11 (x64). A 32-bit build is optional for older 32-bit Windows 7 PCs.
+Windows 10 is the primary target. The same **x64** binary is intended for Windows 7, 8, 8.1, and 11 (x64). Additional named artifacts cover 32-bit Windows and ARM.
+
+## Development tools
 
 ## Development tools
 
@@ -33,15 +35,18 @@ From the repository root:
 ```bash
 make test          # native unit tests (Linux/macOS)
 make test-tz       # same tests under TZ=UTC, America/New_York, Europe/London
-make windows       # cross-compile dist/AdhanVolume.exe (x64)
-make windows-x86   # optional 32-bit exe
+make windows       # dist/AdhanVolume.exe and dist/AdhanVolume-x64.exe
+make windows-x86   # dist/AdhanVolume-x86.exe
+make windows-arm64 # dist/AdhanVolume-arm64.exe (requires llvm-mingw)
+make windows-all   # x64 + x86 + ARM64 when the ARM toolchain is present
 make clean
 ```
 
 `make windows` produces:
 
 - `build/AdhanVolume.exe`
-- `dist/AdhanVolume.exe`  ← copy this file to a Windows machine
+- `dist/AdhanVolume.exe`      ← x64, default name
+- `dist/AdhanVolume-x64.exe`  ← same file, architecture-tagged copy
 
 The executable is linked with `-static -static-libgcc -static-libstdc++ -mwindows`. It uses only OS DLLs that ship with Windows 7+ (`winhttp.dll`, `ole32.dll`, `user32.dll`, …).
 
@@ -80,9 +85,15 @@ Windows 7: TLS 1.2 and current trusted roots are required for HTTPS. Fully updat
 
 ## Supported architectures
 
-| Build                    | Arch | Typical OS          |
-|--------------------------|------|---------------------|
-| `AdhanVolume.exe`        | x64  | Win7–11 64-bit      |
-| `AdhanVolume-x86.exe`    | x86  | Win7 32-bit (optional) |
+| Artifact                   | PE machine | Typical OS | Notes |
+|----------------------------|------------|------------|--------|
+| `AdhanVolume.exe`          | x64        | Win7–11 64-bit | Default name; same bytes as `-x64` |
+| `AdhanVolume-x64.exe`      | x64        | Win7–11 64-bit | Windows 11 ARM can emulate this; **Windows 10 ARM cannot** |
+| `AdhanVolume-x86.exe`      | x86        | Win7 32-bit; **Windows 10 ARM** via x86 emulation | msvcrt, no extra runtime |
+| `AdhanVolume-arm64.exe`    | ARM64      | Windows 10/11 ARM64 | Native; UCRT (Win10+). **Not** for Windows 7/8 |
 
-ARM64 is not produced; Windows 11 ARM can run the x64 binary through emulation if needed.
+ARM64 is produced with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (`aarch64-w64-mingw32-clang++`). Set `LLVM_MINGW` if the toolchain is not in `$HOME/llvm-mingw`.
+
+Do not assume ARM support from an x64 EXE. Windows 10 on ARM does not run x64 binaries; use `-arm64` (preferred) or `-x86`.
+
+Windows 7/8 have no consumer ARM64 edition. The ARM64 artifact is Windows 10/11 ARM only and is linked against UCRT (present on those systems). x64 and x86 continue to use MinGW `msvcrt` so Windows 7 remains supported.

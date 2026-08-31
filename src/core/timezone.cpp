@@ -240,6 +240,15 @@ int64_t next_istanbul_0310(int64_t now_unix) {
   return istanbul_local_to_unix(d, kDailyCacheCheckHour, kDailyCacheCheckMinute, 0);
 }
 
+std::string format_zoned_hms(int64_t unix_utc, const std::string& iana) {
+  int off = timezone_offset_seconds(iana.empty() ? kAuthoritativeTimezone : iana, unix_utc);
+  int y, m, d, h, mi, s;
+  unix_to_civil_utc(unix_utc + off, &y, &m, &d, &h, &mi, &s);
+  char buf[16];
+  std::snprintf(buf, sizeof(buf), "%02d:%02d:%02d", h, mi, s);
+  return buf;
+}
+
 bool parse_hhmm(const std::string& text, int* hour, int* minute) {
   // Accept "HH:MM", "H:MM", optionally followed by a suffix such as " (EEST)".
   int h = -1, m = -1;

@@ -10,11 +10,14 @@ Default location: **Antalya, Türkiye** — timezone **Europe/Istanbul (GMT+3)**
 - No Java, Python, .NET, Node.js, Electron, WebView2, or Visual C++ Redistributable
 - Run as a standard user (no Administrator / UAC)
 
-The release file is a single executable: **AdhanVolume.exe**.
+The release file is a single executable. On 64-bit Windows 10/11/7 use **AdhanVolume.exe** (same as **AdhanVolume-x64.exe**). On **Windows 10 ARM** use **AdhanVolume-arm64.exe** (native) or **AdhanVolume-x86.exe** (x86 emulation). The x64 EXE does not run on Windows 10 ARM.
 
 ## Installation
 
-1. Copy `AdhanVolume.exe` to a folder you control (for example `Documents\AdhanVolume`).
+1. Copy the EXE for your PC to a folder you control (for example `Documents\AdhanVolume`).
+   - 64-bit Intel/AMD: `AdhanVolume.exe` or `AdhanVolume-x64.exe`
+   - 32-bit Windows 7: `AdhanVolume-x86.exe`
+   - Windows 10/11 ARM: `AdhanVolume-arm64.exe` (or `AdhanVolume-x86.exe` on Windows 10 ARM)
 2. Double-click it. No installer.
 
 Settings, cache, and logs are stored in:
@@ -101,7 +104,10 @@ Logs: `%APPDATA%\AdhanVolume\logs\adhanvolume.log` (rotated, size-limited).
 
 | Problem | What to check |
 |---------|----------------|
-| Volume never fades | App must be **Aktif**, in the tray (not closed with **Kapat**), and a valid schedule must be loaded. |
+| Volume never fades | App must be **Aktif**, in the tray (not closed with **Kapat**), and a valid schedule must be loaded. Logs should show `Threshold reached` then `Starting fade-out` then `Setting master volume`. If the first is missing, the scheduler did not see the window; if fade-out is logged but volume does not change, the audio API failed. |
+| Direct audio probe | Run `AdhanVolume.exe --volume-test`. This get/set/verify/restore test ignores prayer times. Results are logged and shown in a dialog. |
+| Verbose scheduler log | Run with `--debug` (or set `ADHAN_DEBUG=1`). High-frequency ticks are otherwise limited to the last ~2 minutes before an event. |
+| Windows 10 ARM: EXE will not start | Use `AdhanVolume-arm64.exe` or `AdhanVolume-x86.exe`. The x64 build cannot run on Windows 10 ARM. |
 | Wrong prayer times | Confirm city and that timezone is Avrupa/İstanbul (GMT+3) for Türkiye. Use **Vakitleri Yenile**. |
 | Windows 7 TLS/HTTPS errors | Install Windows 7 updates that enable TLS 1.2 and modern root certificates. |
 | Volume stuck at 0 after a crash | Restart the app once; it restores the captured volume when the unfinished event has ended, unless you already changed the volume yourself. |

@@ -147,6 +147,14 @@ class VolumeController {
   virtual bool get_master_volume(float* volume) = 0;
   virtual bool set_master_volume(float volume) = 0;
   virtual bool get_mute(bool* muted) = 0;
+  virtual bool set_mute(bool muted) {
+    (void)muted;
+    return false;
+  }
+  // Re-resolve the current default render endpoint (device hotplug / default change).
+  virtual void refresh_endpoint() {}
+  virtual const char* backend_name() const { return "unknown"; }
+  virtual const char* last_error() const { return ""; }
 };
 
 class Clock {

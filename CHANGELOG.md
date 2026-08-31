@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2 — 2026-08-31
+
+- Scheduler no longer sleeps until the next prayer: it reevaluates wall-clock time on an adaptive poll (about 1s when an event is near, 5s when soon, 15s when idle) and on `WM_TIMECHANGE`.
+- Manual system-clock jumps (forward or backward) rebuild event state. A processed prayer is un-marked if its Adhan window is still open, so clock-back tests can retrigger fade.
+- Volume events are selected from the structured schedule, not from the “Sonraki ezan” UI string. The scheduler enters `WAITING_FOR_THRESHOLD` before fade-out starts.
+- WASAPI `IAudioEndpointVolume` rebinds the current default render endpoint on failure, device change, and each capture. Set operations are verified by reading the volume back. HRESULT errors are logged. WinMM mixer remains a fallback.
+- `--volume-test` runs a get/set/verify/restore probe independent of the scheduler. `--debug` enables verbose scheduler ticks.
+- Release artifacts: `AdhanVolume.exe` / `AdhanVolume-x64.exe` (Windows 7–11 x64), `AdhanVolume-x86.exe` (Win7 32-bit and Windows 10 ARM x86 emulation), `AdhanVolume-arm64.exe` (native Windows 10/11 ARM64).
+
 ## 1.0.1 — 2026-08-31
 
 - Turkish as the default UI language (window, buttons, tray, errors, notifications).
