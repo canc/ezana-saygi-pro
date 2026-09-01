@@ -73,6 +73,7 @@ bool config_from_json(const std::string& text, AppConfig* out, std::string* err)
     c.fade_duration_ms = j.get("fade_duration_ms").as_int(DEFAULT_FADE_DURATION_MS);
   if (j.has("aladhan_endpoint"))
     c.aladhan_endpoint = j.get("aladhan_endpoint").as_string(kDefaultAladhanEndpoint);
+  c.aladhan_endpoint = canonical_aladhan_endpoint(c.aladhan_endpoint);
   if (j.has("islamicfinder_endpoint"))
     c.islamicfinder_endpoint =
         j.get("islamicfinder_endpoint").as_string(kDefaultIslamicFinderEndpoint);

@@ -10,6 +10,11 @@ constexpr const char* kMutexName = "Local\\AdhanVolumeSingleton";
 constexpr int kConfigVersion = 2;
 constexpr int kCacheVersion = 1;
 constexpr int kScheduleVersion = 1;
+// Aladhan primary + Diyanet method 13. Older caches (IslamicFinder-primary, or
+// missing this field) are not treated as authoritative.
+constexpr int kPrayerProviderConfigVersion = 2;
+// Aladhan calculation method 13 = Diyanet İşleri Başkanlığı.
+constexpr int kAladhanMethodDiyanet = 13;
 
 constexpr int DEFAULT_ADHAN_DURATION_SECONDS = 180;
 constexpr int DEFAULT_ADHAN_DURATION_FAJR_SECONDS = 300;
@@ -49,7 +54,7 @@ constexpr const char* kDefaultTimezone = "Europe/Istanbul";
 constexpr double kDefaultLatitude = 36.8969;
 constexpr double kDefaultLongitude = 30.6966;
 
-constexpr const char* kDefaultAladhanEndpoint = "https://api.aladhan.com/v1/timings";
+constexpr const char* kDefaultAladhanEndpoint = "https://api.aladhan.com/v1/timingsByCity";
 // Optional custom JSON API. Empty: IslamicFinder uses the public city page.
 constexpr const char* kDefaultIslamicFinderEndpoint = "";
 constexpr const char* kIslamicFinderOrigin = "https://www.islamicfinder.org";

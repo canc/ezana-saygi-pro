@@ -843,10 +843,11 @@ int run(HINSTANCE inst, int show) {
   app.log = new Logger(join_path(app.root, "logs"));
   app.http = create_win_http_client();
   app.vol = create_win_volume_controller(app.log);
-  app.aladhan = new AladhanProvider(app.http, app.cfg.aladhan_endpoint);
+  app.aladhan = new AladhanProvider(app.http, app.cfg.aladhan_endpoint, kAladhanMethodDiyanet);
   app.ifinder = new IslamicFinderProvider(app.http, app.cfg.islamicfinder_endpoint);
+  app.aladhan->set_logger(app.log);
   app.ifinder->set_logger(app.log);
-  app.provider = new FallbackProvider(app.ifinder, app.aladhan, app.log);
+  app.provider = new FallbackProvider(app.aladhan, app.ifinder, app.log);
   app.cache = new CacheManager(app.root, app.provider, app.log);
   app.cache->set_max_retries(kHttpMaxRetries);
   app.sched = new Scheduler(app.vol, app.log, app.root);
