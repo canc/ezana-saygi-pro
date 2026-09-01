@@ -40,8 +40,8 @@ Application (Win32 UI thread + one HTTP worker)
 │
 ├── Infrastructure
 │   ├── PrayerTimeProvider
-│   │     ├── IslamicFinderProvider    primary (JSON API if configured, else public city page)
-│   │     └── AladhanProvider          fallback Awqat Salah HTTPS API
+│   │     ├── AladhanProvider          primary (Diyanet method 13 for Turkey)
+│   │     └── IslamicFinderProvider    fallback (JSON API if configured, else public city page)
 │   ├── CacheManager / repository      ONLY layer that may call a provider
 │   ├── HttpClient (WinHTTP)
 │   └── Logger (rotated)
@@ -54,29 +54,28 @@ The scheduler **never** calls the HTTP client. It reads an in-memory schedule fi
 
 ## Prayer times
 
-`PrayerTimeProvider` is an interface. `FallbackProvider` tries **IslamicFinder.org first**, then Aladhan.
+`PrayerTimeProvider` is an interface. `FallbackProvider` tries **Aladhan first**, then IslamicFinder.org.
 
 ```
+Aladhan timingsByCity
+  city, country, method=13 (Diyanet İşleri Başkanlığı) for Turkey
+        ↓ fail
 IslamicFinder JSON API (optional, never /index.php/api/prayer_times)
         ↓ fail / not configured
 IslamicFinder.org public city page (one GET)
         ↓ fail
-Aladhan (Diyanet method 13 for Turkey)
+No schedule (no fabricated times)
 ```
 
-`IslamicFinderProvider` composes `IslamicFinderApiClient` and `IslamicFinderPageClient`. HTML parsing stays in the provider; the scheduler and cache manager never scrape pages.
+`AladhanProvider` stores `calculation_method` (default **13**) and always serializes it on the request. For Isparta the URL contains `city=Isparta&country=Turkey&method=13`. Saved `.../v1/timings` endpoints are rewritten to `timingsByCity`.
 
-There is no stable unauthenticated public JSON prayer API on islamicfinder.org as of 2026-09-01 (`/index.php/api/prayer_times` is HTTP 404 HTML; `/prayer-times/monthlyPrayer` is cookie/session bound and is not used). The working IslamicFinder source is the public city page, for example:
+`IslamicFinderProvider` composes `IslamicFinderApiClient` and `IslamicFinderPageClient` and remains the fallback only. HTML parsing stays in the provider; the scheduler and cache manager never scrape pages.
 
-`https://www.islamicfinder.org/world/turkey/311073/isparta-prayer-times/`
+The page client prefers embedded JSON when it contains timings, then the `#monthly-prayers` table (matched to the requested Europe/Istanbul date), then labeled meta / semantic tiles. Sunrise, sunset, and Qiyam are ignored as volume events.
 
-The page client prefers embedded JSON in `<script>` tags when it contains prayer timings, then the `#monthly-prayers` table (matched to the requested Europe/Istanbul date), then labeled meta description / semantic `fajar-tile` tiles. Sunrise, sunset, and Qiyam are ignored as volume events. URLs are built from bundled city metadata (`islamicFinderCityId` + country/city slugs), not from concatenating user-entered strings. Coordinates map to the nearest bundled city with an IslamicFinder id.
+Cache files store `source` (`aladhan` / `islamicfinder`), `calculation_method`, and `provider_config_version`. Version **2** is Aladhan-primary + Diyanet 13; older IslamicFinder-primary files are discarded and refetched. A valid current-version cache is reused with zero network requests.
 
-WinHTTP uses User-Agent `EzanaSaygiPRO/<version>`. 403/429/5xx/timeouts fail that strategy and continue the chain. There is no browser engine, CAPTCHA solver, or crawl of country/city indexes.
-
-Aladhan remains the last-resort HTTPS API (no API key, method 13 for Turkey). Cache `source` is `islamicfinder` or `aladhan`.
-
-Responses are validated (required prayers İmsak/Fajr, Öğle, İkindi, Akşam, Yatsı; HH:MM; monotonic times; date). Failures keep the last good cache. Nothing is invented locally. Volume automation does not run without a valid schedule.
+Responses are validated (required prayers İmsak/Fajr, Öğle, İkindi, Akşam, Yatsı; HH:MM; monotonic times; date). Failures keep the last good **current-version** cache. Nothing is invented locally. Volume automation does not run without a valid schedule.
 
 ## Cache identity and 03:10 Europe/Istanbul
 

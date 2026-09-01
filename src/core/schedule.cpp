@@ -76,6 +76,8 @@ std::string schedule_to_json(const PrayerSchedule& s) {
   j["longitude"] = Json::number(normalize_coord(s.location.longitude));
   j["fetchedAt"] = Json::number(static_cast<double>(s.fetched_at_unix));
   j["source"] = Json::string(s.source);
+  j["provider_config_version"] = Json::number(s.provider_config_version);
+  j["calculation_method"] = Json::number(s.calculation_method);
   Json prayers = Json::object();
   prayers["fajr"] = occ_to_json(s.prayers[PRAYER_FAJR]);
   prayers["sunrise"] = occ_to_json(s.prayers[PRAYER_SUNRISE]);
@@ -125,6 +127,8 @@ bool schedule_from_json(const std::string& text, PrayerSchedule* out, std::strin
   s.location.longitude = j.get("longitude").as_number();
   s.fetched_at_unix = j.get("fetchedAt").as_int64(0);
   s.source = j.get("source").as_string("unknown");
+  s.provider_config_version = j.get("provider_config_version").as_int(0);
+  s.calculation_method = j.get("calculation_method").as_int(0);
   const Json& prayers = j.get("prayers");
   if (!prayers.is_object()) {
     if (err) *err = "missing prayers";

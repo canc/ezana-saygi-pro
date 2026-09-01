@@ -144,6 +144,20 @@ bool islamicfinder_json_api_configured(const std::string& endpoint) {
   return !canonical_islamicfinder_endpoint(endpoint).empty();
 }
 
+std::string canonical_aladhan_endpoint(const std::string& endpoint) {
+  std::string out = endpoint.empty() ? kDefaultAladhanEndpoint : endpoint;
+  if (out.find("timingsByCity") != std::string::npos) return out;
+  if (out.find("timingsByAddress") != std::string::npos) return out;
+  const char kTimings[] = "/v1/timings";
+  size_t p = out.find(kTimings);
+  if (p == std::string::npos) return out;
+  size_t after = p + sizeof(kTimings) - 1;
+  if (after < out.size() && out[after] != '/' && out[after] != '?' && out[after] != '\0')
+    return out;
+  out.insert(after, "ByCity");
+  return out;
+}
+
 AppConfig default_config() {
   AppConfig c;
   c.version = kConfigVersion;
