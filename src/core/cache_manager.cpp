@@ -85,6 +85,10 @@ bool CacheManager::matches(const PrayerSchedule& s, const Location& loc,
   if (s.location.timezone != loc.timezone) return false;
   if (normalize_coord(s.location.latitude) != normalize_coord(loc.latitude)) return false;
   if (normalize_coord(s.location.longitude) != normalize_coord(loc.longitude)) return false;
+  if (s.provider_config_version != kPrayerProviderConfigVersion) {
+    if (log_) log_->info("Prayer cache from previous provider configuration discarded");
+    return false;
+  }
   return true;
 }
 

@@ -16,17 +16,24 @@ class PrayerTimeProvider {
   virtual void set_logger(Logger* log) { (void)log; }
 };
 
-// Public Awqat Salah API. Used only when IslamicFinder cannot provide times.
+// Public Awqat Salah API. Primary provider. Turkish locations use Diyanet method 13.
 class AladhanProvider : public PrayerTimeProvider {
  public:
   AladhanProvider(HttpClient* http, std::string endpoint);
+  AladhanProvider(HttpClient* http, std::string endpoint, int calculation_method);
   const char* name() const override { return "Aladhan"; }
+  void set_logger(Logger* log) override { log_ = log; }
+  int calculation_method() const { return calculation_method_; }
   bool fetch_daily(const Location& loc, const CalendarDate& date, int timeout_ms,
                    PrayerSchedule* out, std::string* err) override;
 
  private:
   HttpClient* http_;
   std::string endpoint_;
+  int calculation_method_;
+  Logger* log_;
+
+  int method_for(const Location& loc) const;
 };
 
 // Optional machine-readable IslamicFinder JSON endpoint (never the retired
@@ -54,7 +61,7 @@ class IslamicFinderPageClient {
   bool resolve_page_url(const Location& loc, int timeout_ms, std::string* url, std::string* err);
 };
 
-// Primary provider: JSON API (if configured), then the public city page.
+// Fallback provider: public city page, then optional JSON API.
 class IslamicFinderProvider : public PrayerTimeProvider {
  public:
   IslamicFinderProvider(HttpClient* http, std::string json_endpoint);

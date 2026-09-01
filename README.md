@@ -76,15 +76,13 @@ Each prayer has its own Adhan hold duration, configured under **Ezan Sürelerini
 
 ## Prayer times API and cache
 
-Prayer times are loaded from **IslamicFinder.org** first. Aladhan is a fallback only.
+Prayer times are loaded from **Aladhan first**, with **method 13 (Diyanet İşleri Başkanlığı)** for Turkish cities. The request includes the selected city and country, for example:
 
-1. Optional custom IslamicFinder JSON endpoint (if configured). The retired `/index.php/api/prayer_times` path is never called.
-2. The public IslamicFinder city page for the selected location (for example Isparta: `https://www.islamicfinder.org/world/turkey/311073/isparta-prayer-times/`).
-3. Aladhan (Diyanet method 13 for Türkiye) only if both IslamicFinder methods fail.
+`city=Isparta&country=Turkey&method=13`
 
-The retired `islamicfinder.us` host is not used. Saved configs that still point at it, or at `/index.php/api/prayer_times`, are ignored for the JSON API.
+IslamicFinder.org is used only if Aladhan fails (optional JSON API, then the public city page). The retired `islamicfinder.us` host and `/index.php/api/prayer_times` path are not used.
 
-Daily times are **cached per location and calendar date**. The provider is **not** called on a timer and is **not** called by the volume scheduler. The cache records `source` as `islamicfinder` or `aladhan`. The main window shows **Kaynak: IslamicFinder** or **Kaynak: Aladhan**.
+Daily times are **cached per location and calendar date**. The provider is **not** called on a timer and is **not** called by the volume scheduler. The cache records `source` as `aladhan` or `islamicfinder`, plus `calculation_method`. The main window shows **Kaynak: Aladhan** or **Kaynak: IslamicFinder**. Caches written before this Aladhan-primary configuration are refreshed once.
 
 The cache date and the daily check use **Europe/Istanbul**, not the Windows time zone and not the provider’s server time zone.
 

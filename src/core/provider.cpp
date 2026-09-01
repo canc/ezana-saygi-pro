@@ -32,7 +32,7 @@ std::string url_encode(const std::string& s) {
 }
 
 int calculation_method_for_location(const Location& loc) {
-  if (loc.country == "Turkey" || loc.timezone == "Europe/Istanbul") return 13;  // Diyanet
+  if (loc.country == "Turkey" || loc.timezone == "Europe/Istanbul") return kAladhanMethodDiyanet;
   if (loc.country == "Saudi Arabia") return 4;
   if (loc.country == "Egypt") return 5;
   if (loc.country == "United States" || loc.country == "Canada") return 2;
@@ -89,7 +89,8 @@ bool parse_prayer_timings_object(const Json& timings, PrayerSchedule* out, std::
 }
 
 static bool finish_schedule(PrayerSchedule* s, const Location& loc, const CalendarDate& date,
-                            const char* source, int64_t fetched_at, std::string* err) {
+                            const char* source, int64_t fetched_at, std::string* err,
+                            int calculation_method = 0) {
   s->version = kScheduleVersion;
   s->cache_date_istanbul = date;
   s->local_date = date;
@@ -98,6 +99,8 @@ static bool finish_schedule(PrayerSchedule* s, const Location& loc, const Calend
   s->location.longitude = normalize_coord(loc.longitude);
   s->fetched_at_unix = fetched_at;
   s->source = source;
+  s->provider_config_version = kPrayerProviderConfigVersion;
+  s->calculation_method = calculation_method;
   if (!fill_unix_times(s)) {
     if (err) *err = "validated times failed integrity checks";
     return false;
@@ -105,25 +108,66 @@ static bool finish_schedule(PrayerSchedule* s, const Location& loc, const Calend
   return true;
 }
 
+static void plog(Logger* log, bool warn, const std::string& msg) {
+  if (!log) return;
+  if (warn)
+    log->warn(msg);
+  else
+    log->info(msg);
+}
+
 AladhanProvider::AladhanProvider(HttpClient* http, std::string endpoint)
-    : http_(http), endpoint_(endpoint.empty() ? kDefaultAladhanEndpoint : endpoint) {}
+    : AladhanProvider(http, endpoint, kAladhanMethodDiyanet) {}
+
+AladhanProvider::AladhanProvider(HttpClient* http, std::string endpoint, int calculation_method)
+    : http_(http),
+      endpoint_(canonical_aladhan_endpoint(endpoint.empty() ? kDefaultAladhanEndpoint : endpoint)),
+      calculation_method_(calculation_method > 0 ? calculation_method : kAladhanMethodDiyanet),
+      log_(0) {}
+
+int AladhanProvider::method_for(const Location& loc) const {
+  if (loc.country == "Turkey" || loc.timezone == kAuthoritativeTimezone) return calculation_method_;
+  return calculation_method_for_location(loc);
+}
 
 bool AladhanProvider::fetch_daily(const Location& loc, const CalendarDate& date, int timeout_ms,
                                   PrayerSchedule* out, std::string* err) {
+  const int method = method_for(loc);
+  plog(log_, false, "Prayer provider: Aladhan");
+  plog(log_, false, std::string("Location: ") + loc.city + ", " + loc.country);
+  if (method == kAladhanMethodDiyanet) {
+    char mb[96];
+    std::snprintf(mb, sizeof(mb),
+                  "Calculation method: %d (Diyanet \xc4\xb0\xc5\x9fleri Ba\xc5\x9fkanl\xc4\xb1\xc4\x9f\xc4\xb1)",
+                  method);
+    plog(log_, false, mb);
+  } else {
+    char mb[64];
+    std::snprintf(mb, sizeof(mb), "Calculation method: %d", method);
+    plog(log_, false, mb);
+  }
+
   if (!http_) {
     if (err) *err = "no http client";
+    plog(log_, true, "Aladhan request failed");
     return false;
   }
   if (!loc.valid() || !date.valid()) {
     if (err) *err = "invalid location or date";
+    plog(log_, true, "Aladhan request failed");
     return false;
   }
+  if (loc.city.empty() || loc.country.empty()) {
+    if (err) *err = "Aladhan city/country required";
+    plog(log_, true, "Aladhan request failed");
+    return false;
+  }
+
   char dbuf[32];
   std::snprintf(dbuf, sizeof(dbuf), "%02d-%02d-%04d", date.day, date.month, date.year);
-  char q[512];
-  std::snprintf(q, sizeof(q), "/%s?latitude=%.4f&longitude=%.4f&method=%d&timezonestring=%s", dbuf,
-                loc.latitude, loc.longitude, calculation_method_for_location(loc),
-                url_encode(loc.timezone).c_str());
+  char q[768];
+  std::snprintf(q, sizeof(q), "/%s?city=%s&country=%s&method=%d", dbuf, url_encode(loc.city).c_str(),
+                url_encode(loc.country).c_str(), method);
   std::string url = endpoint_;
   if (!url.empty() && url[url.size() - 1] == '/') url.erase(url.size() - 1);
   url += q;
@@ -131,6 +175,7 @@ bool AladhanProvider::fetch_daily(const Location& loc, const CalendarDate& date,
   HttpResult r = http_->get(url, timeout_ms);
   if (!r.ok) {
     if (err) *err = r.error.empty() ? "http request failed" : r.error;
+    plog(log_, true, "Aladhan request failed");
     return false;
   }
   if (r.status != 200) {
@@ -139,26 +184,33 @@ bool AladhanProvider::fetch_daily(const Location& loc, const CalendarDate& date,
       std::snprintf(b, sizeof(b), "http status %d", r.status);
       *err = b;
     }
+    plog(log_, true, "Aladhan request failed");
     return false;
   }
   Json root;
   std::string perr;
   if (!Json::parse(r.body, &root, &perr)) {
     if (err) *err = "invalid JSON: " + perr;
+    plog(log_, true, "Aladhan request failed");
     return false;
   }
   if (root.get("code").as_int(0) != 200 && !root.has("data")) {
     if (err) *err = "API returned error";
+    plog(log_, true, "Aladhan request failed");
     return false;
   }
   const Json& data = root.get("data");
   const Json& timings = data.get("timings");
   if (!timings.is_object()) {
     if (err) *err = "missing timings";
+    plog(log_, true, "Aladhan request failed");
     return false;
   }
   PrayerSchedule s;
-  if (!parse_prayer_timings_object(timings, &s, err)) return false;
+  if (!parse_prayer_timings_object(timings, &s, err)) {
+    plog(log_, true, "Aladhan request failed");
+    return false;
+  }
 
   const Json& greg = data.get("date").get("gregorian");
   if (greg.is_object() && greg.has("date")) {
@@ -167,6 +219,7 @@ bool AladhanProvider::fetch_daily(const Location& loc, const CalendarDate& date,
     if (std::sscanf(gd.c_str(), "%d-%d-%d", &dd, &mm, &yy) == 3) {
       if (yy != date.year || mm != date.month || dd != date.day) {
         if (err) *err = "API date mismatch";
+        plog(log_, true, "Aladhan request failed");
         return false;
       }
     }
@@ -180,16 +233,14 @@ bool AladhanProvider::fetch_daily(const Location& loc, const CalendarDate& date,
       }
     }
   }
-  return finish_schedule(&s, loc, date, kSourceAladhan, SystemClock().now_unix(), err) &&
-         (*out = s, true);
-}
-
-static void plog(Logger* log, bool warn, const std::string& msg) {
-  if (!log) return;
-  if (warn)
-    log->warn(msg);
-  else
-    log->info(msg);
+  if (!finish_schedule(&s, loc, date, kSourceAladhan, SystemClock().now_unix(), err, method)) {
+    plog(log_, true, "Aladhan request failed");
+    return false;
+  }
+  *out = s;
+  plog(log_, false, "Prayer schedule retrieved successfully");
+  plog(log_, false, "Prayer schedule source: Aladhan");
+  return true;
 }
 
 static bool http_access_denied(int status) {
@@ -883,10 +934,15 @@ bool FallbackProvider::fetch_daily(const Location& loc, const CalendarDate& date
                                    PrayerSchedule* out, std::string* err) {
   std::string e1, e2;
   if (primary_ && primary_->fetch_daily(loc, date, timeout_ms, out, &e1)) return true;
+  if (primary_ && !e1.empty())
+    plog(log_, true, std::string(primary_->name()) + " request failed");
   if (secondary_) {
-    plog(log_, false, "Falling back to Aladhan");
+    if (std::string(secondary_->name()) == "IslamicFinder")
+      plog(log_, false, "Falling back to IslamicFinder.org");
+    else
+      plog(log_, false, std::string("Falling back to ") + secondary_->name());
     if (secondary_->fetch_daily(loc, date, timeout_ms, out, &e2)) {
-      plog(log_, false, "Prayer schedule source: Aladhan");
+      plog(log_, false, std::string("Prayer schedule source: ") + secondary_->name());
       return true;
     }
   }

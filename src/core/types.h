@@ -67,9 +67,12 @@ struct PrayerSchedule {
   Location location;
   int64_t fetched_at_unix;
   std::string source;
+  int provider_config_version;
+  int calculation_method;
   PrayerOccurrence prayers[PRAYER_COUNT];
 
-  PrayerSchedule() : version(0), fetched_at_unix(0) {
+  PrayerSchedule()
+      : version(0), fetched_at_unix(0), provider_config_version(0), calculation_method(0) {
     cache_date_istanbul.year = cache_date_istanbul.month = cache_date_istanbul.day = 0;
     local_date.year = local_date.month = local_date.day = 0;
     for (int i = 0; i < PRAYER_COUNT; ++i) {
@@ -138,6 +141,8 @@ AppConfig default_config();
 // Empty, retired /index.php/api/prayer_times, and .us hosts are not used as a JSON API.
 std::string canonical_islamicfinder_endpoint(const std::string& endpoint);
 bool islamicfinder_json_api_configured(const std::string& endpoint);
+// Historical /v1/timings coordinate endpoint is rewritten to timingsByCity.
+std::string canonical_aladhan_endpoint(const std::string& endpoint);
 
 struct HttpResult {
   bool ok;
