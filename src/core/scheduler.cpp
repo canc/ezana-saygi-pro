@@ -521,17 +521,14 @@ void Scheduler::refresh_status(int64_t now_ms) {
   status_.next_prayer_unix = 0;
   status_.message.clear();
 
-  if (!cfg_.enabled) {
-    status_.message = "Disabled";
-    return;
-  }
   if (!has_schedule_) {
-    status_.message = "No prayer schedule";
+    status_.message = cfg_.enabled ? "No prayer schedule" : "Disabled";
     return;
   }
 
   int64_t now_unix = now_ms / 1000;
-  bool show_active_prayer = has_active_ && active_.state != ST_WAITING_FOR_THRESHOLD &&
+  bool show_active_prayer = cfg_.enabled && has_active_ &&
+                            active_.state != ST_WAITING_FOR_THRESHOLD &&
                             active_.state != ST_IDLE && active_.state != ST_RESTORED;
   if (show_active_prayer) {
     status_.next_prayer_name = prayer_name(active_.prayer);
@@ -547,6 +544,10 @@ void Scheduler::refresh_status(int64_t now_ms) {
       status_.next_prayer_unix = p.unix_utc;
       break;
     }
+  }
+  if (!cfg_.enabled) {
+    status_.message = "Disabled";
+    return;
   }
   if (status_.next_prayer_name.empty())
     status_.message = "No remaining prayers today";

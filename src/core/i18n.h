@@ -24,6 +24,10 @@ const wchar_t* refresh_times();
 const wchar_t* close_hint();
 const wchar_t* active();
 const wchar_t* inactive();
+const wchar_t* enable_action();
+const wchar_t* disable_action();
+const wchar_t* toggle_action(bool currently_enabled);
+std::wstring app_version();
 const wchar_t* tray_show();
 const wchar_t* tray_exit();
 const wchar_t* threshold_option(int seconds);
@@ -51,6 +55,7 @@ const wchar_t* duration_invalid();
 std::wstring location_item(const char* city, const char* country_en);
 std::wstring timezone_text(const std::string& iana, int64_t unix_utc);
 std::wstring tray_tip(const wchar_t* next_prayer, bool enabled);
+std::wstring source_text(const std::string& source);
 
 }  // namespace ui
 }  // namespace adhan

@@ -5,8 +5,8 @@ IDI_APPICON ICON "assets/app.ico"
 1 24 "src/win/app.manifest"
 
 1 VERSIONINFO
-FILEVERSION 1,0,3,0
-PRODUCTVERSION 1,0,3,0
+FILEVERSION 1,0,4,0
+PRODUCTVERSION 1,0,4,0
 FILEOS 0x40004
 FILETYPE 0x1
 {
@@ -16,11 +16,11 @@ FILETYPE 0x1
     {
       VALUE "CompanyName", "Ezana Saygı PRO"
       VALUE "FileDescription", "Ezan vakitlerinde sistem sesini kısar"
-      VALUE "FileVersion", "1.0.3"
+      VALUE "FileVersion", "1.0.4"
       VALUE "InternalName", "AdhanVolume"
       VALUE "OriginalFilename", "AdhanVolume.exe"
       VALUE "ProductName", "Ezana Saygı PRO"
-      VALUE "ProductVersion", "1.0.3"
+      VALUE "ProductVersion", "1.0.4"
     }
   }
   BLOCK "VarFileInfo"

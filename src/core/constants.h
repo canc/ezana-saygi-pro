@@ -4,7 +4,7 @@ namespace adhan {
 
 constexpr const char* kAppName = "Adhan Volume";
 constexpr const char* kAppFolderName = "AdhanVolume";
-constexpr const char* kVersion = "1.0.3";
+constexpr const char* kVersion = "1.0.4";
 constexpr const char* kMutexName = "Local\\AdhanVolumeSingleton";
 
 constexpr int kConfigVersion = 2;
@@ -50,8 +50,13 @@ constexpr double kDefaultLatitude = 36.8969;
 constexpr double kDefaultLongitude = 30.6966;
 
 constexpr const char* kDefaultAladhanEndpoint = "https://api.aladhan.com/v1/timings";
-constexpr const char* kDefaultIslamicFinderEndpoint =
-    "https://www.islamicfinder.us/index.php/api/prayer_times";
+// Optional custom JSON API. Empty: IslamicFinder uses the public city page.
+constexpr const char* kDefaultIslamicFinderEndpoint = "";
+constexpr const char* kIslamicFinderOrigin = "https://www.islamicfinder.org";
+constexpr const char* kIslamicFinderSearchPath = "/world/global-search?cityOnly=1&keyword=";
+constexpr const char* kSourceIslamicFinder = "islamicfinder";
+constexpr const char* kSourceAladhan = "aladhan";
+constexpr const char* kHttpUserAgentPrefix = "EzanaSaygiPRO/";
 
 constexpr int kThresholdOptions[] = {30, 60, 120};
 constexpr int kThresholdOptionCount = 3;

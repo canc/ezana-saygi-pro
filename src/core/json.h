@@ -50,6 +50,7 @@ class Json {
   bool is_string() const { return type_ == STRING; }
   bool is_number() const { return type_ == NUMBER; }
   bool is_bool() const { return type_ == BOOL; }
+  bool is_array() const { return type_ == ARRAY; }
 
   bool as_bool(bool def = false) const { return type_ == BOOL ? b_ : def; }
   double as_number(double def = 0) const { return type_ == NUMBER ? n_ : def; }

@@ -250,16 +250,24 @@ std::string format_zoned_hms(int64_t unix_utc, const std::string& iana) {
 }
 
 bool parse_hhmm(const std::string& text, int* hour, int* minute) {
-  // Accept "HH:MM", "H:MM", optionally followed by a suffix such as " (EEST)".
+  // Accept "HH:MM", "H:MM", optional AM/PM, optionally followed by a suffix such as " (EEST)".
   int h = -1, m = -1;
   int n = 0;
   const char* p = text.c_str();
   while (*p && (*p < '0' || *p > '9')) ++p;
   if (std::sscanf(p, "%d:%d%n", &h, &m, &n) < 2) return false;
-  if (h == 24 && m == 0) {
-    h = 0;
+  const char* rest = p + n;
+  while (*rest == ' ' || *rest == '\t') ++rest;
+  bool pm = (rest[0] == 'P' || rest[0] == 'p') && (rest[1] == 'M' || rest[1] == 'm');
+  bool am = (rest[0] == 'A' || rest[0] == 'a') && (rest[1] == 'M' || rest[1] == 'm');
+  if (am || pm) {
+    if (h < 1 || h > 12 || m < 0 || m > 59) return false;
+    if (am && h == 12) h = 0;
+    else if (pm && h != 12) h += 12;
+  } else {
+    if (h == 24 && m == 0) h = 0;
+    if (h < 0 || h > 23 || m < 0 || m > 59) return false;
   }
-  if (h < 0 || h > 23 || m < 0 || m > 59) return false;
   *hour = h;
   *minute = m;
   return true;

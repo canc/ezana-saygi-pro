@@ -48,6 +48,7 @@ std::string config_to_json(const AppConfig& cfg) {
   j["fade_duration_ms"] = Json::number(cfg.fade_duration_ms);
   j["aladhan_endpoint"] = Json::string(cfg.aladhan_endpoint);
   j["islamicfinder_endpoint"] = Json::string(cfg.islamicfinder_endpoint);
+  j["islamicfinder_city_id"] = Json::number(cfg.islamicfinder_city_id);
   j["http_timeout_ms"] = Json::number(cfg.http_timeout_ms);
   return j.stringify(true);
 }
@@ -75,6 +76,10 @@ bool config_from_json(const std::string& text, AppConfig* out, std::string* err)
   if (j.has("islamicfinder_endpoint"))
     c.islamicfinder_endpoint =
         j.get("islamicfinder_endpoint").as_string(kDefaultIslamicFinderEndpoint);
+  c.islamicfinder_endpoint = canonical_islamicfinder_endpoint(c.islamicfinder_endpoint);
+  if (j.has("islamicfinder_city_id"))
+    c.islamicfinder_city_id = j.get("islamicfinder_city_id").as_int(0);
+  apply_islamicfinder_place(&c);
   if (j.has("http_timeout_ms")) c.http_timeout_ms = j.get("http_timeout_ms").as_int(kHttpTimeoutMs);
 
   int legacy = 0;
@@ -134,9 +139,11 @@ bool load_config(const std::string& path, AppConfig* out, std::string* err) {
 }
 
 bool save_config(const std::string& path, const AppConfig& cfg) {
+  AppConfig stored = cfg;
+  apply_islamicfinder_place(&stored);
   std::string parent = parent_path(path);
   if (!parent.empty()) mkdir_p(parent);
-  return write_file_atomic(path, config_to_json(cfg));
+  return write_file_atomic(path, config_to_json(stored));
 }
 
 }  // namespace adhan

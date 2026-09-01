@@ -1,5 +1,7 @@
 #include "types.h"
 
+#include "locations.h"
+
 #include <cmath>
 #include <cstdio>
 #include <ctime>
@@ -125,6 +127,23 @@ const char* event_state_name(EventState s) {
   }
 }
 
+std::string canonical_islamicfinder_endpoint(const std::string& endpoint) {
+  std::string out = endpoint;
+  const char kFrom[] = "islamicfinder.us";
+  const char kTo[] = "islamicfinder.org";
+  size_t pos = 0;
+  while ((pos = out.find(kFrom, pos)) != std::string::npos) {
+    out.replace(pos, sizeof(kFrom) - 1, kTo);
+    pos += sizeof(kTo) - 1;
+  }
+  if (out.find("index.php/api/prayer_times") != std::string::npos) return "";
+  return out;
+}
+
+bool islamicfinder_json_api_configured(const std::string& endpoint) {
+  return !canonical_islamicfinder_endpoint(endpoint).empty();
+}
+
 AppConfig default_config() {
   AppConfig c;
   c.version = kConfigVersion;
@@ -145,7 +164,9 @@ AppConfig default_config() {
   c.fade_duration_ms = DEFAULT_FADE_DURATION_MS;
   c.aladhan_endpoint = kDefaultAladhanEndpoint;
   c.islamicfinder_endpoint = kDefaultIslamicFinderEndpoint;
+  c.islamicfinder_city_id = 0;
   c.http_timeout_ms = kHttpTimeoutMs;
+  apply_islamicfinder_place(&c);
   return c;
 }
 
@@ -192,6 +213,7 @@ Location AppConfig::location() const {
   loc.timezone = timezone;
   loc.latitude = latitude;
   loc.longitude = longitude;
+  loc.islamicfinder_city_id = islamicfinder_city_id;
   return loc;
 }
 

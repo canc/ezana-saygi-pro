@@ -28,7 +28,7 @@ Windows 11-only APIs are not used. DPI awareness is loaded dynamically (`SetProc
 Application (Win32 UI thread + one HTTP worker)
 │
 ├── UI
-│   ├── Main window (status, location, timezone, threshold, next prayer, ON/OFF)
+│   ├── Main window (status, location, timezone, threshold, next prayer, enable/disable action)
 │   └── TrayManager (hide-on-close, Göster / Kapat)
 │
 ├── Core
@@ -40,9 +40,9 @@ Application (Win32 UI thread + one HTTP worker)
 │
 ├── Infrastructure
 │   ├── PrayerTimeProvider
-│   │     ├── AladhanProvider          public Awqat Salah HTTPS API (default)
-│   │     └── IslamicFinderProvider    compatible fallback endpoint
-│   ├── CacheManager / repository      ONLY layer that may call the API
+│   │     ├── IslamicFinderProvider    primary (JSON API if configured, else public city page)
+│   │     └── AladhanProvider          fallback Awqat Salah HTTPS API
+│   ├── CacheManager / repository      ONLY layer that may call a provider
 │   ├── HttpClient (WinHTTP)
 │   └── Logger (rotated)
 │
@@ -54,9 +54,29 @@ The scheduler **never** calls the HTTP client. It reads an in-memory schedule fi
 
 ## Prayer times
 
-`PrayerTimeProvider` is an interface. `FallbackProvider` tries Aladhan first (no API key, HTTPS, Diyanet method 13 for Turkey), then the configured Islamic Finder–compatible URL.
+`PrayerTimeProvider` is an interface. `FallbackProvider` tries **IslamicFinder.org first**, then Aladhan.
 
-Responses are validated (required prayers, HH:MM, monotonic times, date). Failures keep the last good cache. Nothing is invented locally.
+```
+IslamicFinder JSON API (optional, never /index.php/api/prayer_times)
+        ↓ fail / not configured
+IslamicFinder.org public city page (one GET)
+        ↓ fail
+Aladhan (Diyanet method 13 for Turkey)
+```
+
+`IslamicFinderProvider` composes `IslamicFinderApiClient` and `IslamicFinderPageClient`. HTML parsing stays in the provider; the scheduler and cache manager never scrape pages.
+
+There is no stable unauthenticated public JSON prayer API on islamicfinder.org as of 2026-09-01 (`/index.php/api/prayer_times` is HTTP 404 HTML; `/prayer-times/monthlyPrayer` is cookie/session bound and is not used). The working IslamicFinder source is the public city page, for example:
+
+`https://www.islamicfinder.org/world/turkey/311073/isparta-prayer-times/`
+
+The page client prefers embedded JSON in `<script>` tags when it contains prayer timings, then the `#monthly-prayers` table (matched to the requested Europe/Istanbul date), then labeled meta description / semantic `fajar-tile` tiles. Sunrise, sunset, and Qiyam are ignored as volume events. URLs are built from bundled city metadata (`islamicFinderCityId` + country/city slugs), not from concatenating user-entered strings. Coordinates map to the nearest bundled city with an IslamicFinder id.
+
+WinHTTP uses User-Agent `EzanaSaygiPRO/<version>`. 403/429/5xx/timeouts fail that strategy and continue the chain. There is no browser engine, CAPTCHA solver, or crawl of country/city indexes.
+
+Aladhan remains the last-resort HTTPS API (no API key, method 13 for Turkey). Cache `source` is `islamicfinder` or `aladhan`.
+
+Responses are validated (required prayers İmsak/Fajr, Öğle, İkindi, Akşam, Yatsı; HH:MM; monotonic times; date). Failures keep the last good cache. Nothing is invented locally. Volume automation does not run without a valid schedule.
 
 ## Cache identity and 03:10 Europe/Istanbul
 
@@ -70,7 +90,7 @@ Example: `Europe/Istanbul:36.8969:30.6966:2026-08-31`
 
 The **date** and the daily **check** are computed in **Europe/Istanbul (GMT+3)** from UTC timestamps. The Windows zone, hosting zone, and API server zone are ignored.
 
-At 03:10 Istanbul the app **validates** today’s cache. It requests the API only if that entry is missing or invalid.
+At 03:10 Istanbul the app **validates** today’s cache. It contacts IslamicFinder (then Aladhan only if needed) only if that entry is missing or invalid.
 
 On startup, resume, or location change it also checks immediately — it does not wait until the next 03:10.
 

@@ -1,5 +1,6 @@
 #include "i18n.h"
 
+#include "constants.h"
 #include "timezone.h"
 
 namespace adhan {
@@ -30,6 +31,19 @@ const wchar_t* close_hint() {
 }
 const wchar_t* active() { return is_en() ? L"On" : L"Aktif"; }
 const wchar_t* inactive() { return is_en() ? L"Off" : L"Pasif"; }
+const wchar_t* enable_action() { return is_en() ? L"Enable" : L"Etkinle\u015ftir"; }
+const wchar_t* disable_action() {
+  return is_en() ? L"Disable" : L"Devre D\u0131\u015f\u0131 B\u0131rak";
+}
+const wchar_t* toggle_action(bool currently_enabled) {
+  return currently_enabled ? disable_action() : enable_action();
+}
+std::wstring app_version() {
+  std::wstring w = L"v";
+  for (const char* p = kVersion; p && *p; ++p)
+    w.push_back(static_cast<wchar_t>(static_cast<unsigned char>(*p)));
+  return w;
+}
 const wchar_t* tray_show() { return is_en() ? L"Show" : L"G\u00f6ster"; }
 const wchar_t* tray_exit() { return is_en() ? L"Exit" : L"Kapat"; }
 
@@ -239,6 +253,20 @@ std::wstring tray_tip(const wchar_t* next_prayer, bool enabled) {
   t += enabled ? active() : inactive();
   t += L")";
   return t;
+}
+
+std::wstring source_text(const std::string& source) {
+  if (source.empty()) return std::wstring();
+  std::wstring label = is_en() ? L"Source: " : L"Kaynak: ";
+  if (source == kSourceIslamicFinder || source == "IslamicFinder")
+    label += L"IslamicFinder";
+  else if (source == kSourceAladhan || source == "Aladhan")
+    label += L"Aladhan";
+  else {
+    for (size_t i = 0; i < source.size(); ++i)
+      label.push_back(static_cast<wchar_t>(static_cast<unsigned char>(source[i])));
+  }
+  return label;
 }
 
 }  // namespace ui

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.4 — 2026-09-01
+
+- **IslamicFinder.org is the primary prayer-time source.** Aladhan is used only when both IslamicFinder strategies fail.
+- Provider order: optional IslamicFinder JSON API → IslamicFinder.org public city page → Aladhan. The retired `/index.php/api/prayer_times` path (and `islamicfinder.us`) is not used as an API. A 404 on that old endpoint no longer makes Aladhan the silent default.
+- Public city pages such as `https://www.islamicfinder.org/world/turkey/311073/isparta-prayer-times/` are fetched with a single targeted GET. Times are taken from embedded JSON when present, otherwise from the semantic monthly table / labeled meta description / prayer tiles. The page date is matched in **Europe/Istanbul**.
+- Bundled cities store IslamicFinder city IDs (Isparta = 311073). URLs are not built by concatenating user-entered strings.
+- Daily cache still keys on timezone + coordinates + Istanbul date. Successful IslamicFinder results are stored with `source = "islamicfinder"`; Aladhan fallback uses `source = "aladhan"`. A valid cache means zero network requests on restart and at 03:10.
+- The main window shows **Kaynak: IslamicFinder** or **Kaynak: Aladhan** when a schedule is loaded.
+- Enable/disable control is action-oriented: status stays **Aktif** / **Pasif**; the button is **Devre Dışı Bırak** or **Etkinleştir**.
+- Application version is **1.0.4** (`v1.0.4` in the main window). Windows EXE Product Name remains **Ezana Saygı PRO**.
+
 ## 1.0.3 — 2026-08-31
 
 - Visible product name is **Ezana Saygı PRO** (bold in the main window).

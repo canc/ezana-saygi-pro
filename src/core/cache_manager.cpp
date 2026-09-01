@@ -133,7 +133,7 @@ bool CacheManager::fetch_from_api(const Location& loc, const CalendarDate& date,
   int timeout = kHttpTimeoutMs;
   for (int attempt = 0; attempt < max_retries_; ++attempt) {
     ++api_attempts_;
-    log_info("Requesting prayer schedule from API");
+    log_info("Requesting prayer schedule");
     PrayerSchedule s;
     std::string e;
     if (provider_->fetch_daily(loc, date, timeout, &s, &e)) {
@@ -142,6 +142,7 @@ bool CacheManager::fetch_from_api(const Location& loc, const CalendarDate& date,
         log_info("Prayer schedule validation failed");
       } else {
         log_info("Prayer schedule validated");
+        log_info(std::string("Prayer schedule source: ") + s.source);
         if (save_key(s)) log_info("Prayer schedule cached");
         *out = s;
         ok = true;

@@ -7,6 +7,7 @@
 #include <cstring>
 #include <string>
 
+#include "core/constants.h"
 #include "core/types.h"
 
 #ifndef WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_1
@@ -86,7 +87,8 @@ class WinHttpClient : public HttpClient {
       return r;
     }
 
-    HINTERNET session = WinHttpOpen(L"AdhanVolume/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+    HINTERNET session = WinHttpOpen(utf8_to_wide(std::string(kHttpUserAgentPrefix) + kVersion).c_str(),
+                                    WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                     WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) {
       r.error = "WinHttpOpen failed";

@@ -232,6 +232,7 @@ void on_location_sel(App* a) {
   a->cfg.latitude = c->latitude;
   a->cfg.longitude = c->longitude;
   a->cfg.timezone = c->timezone;
+  apply_islamicfinder_place(&a->cfg);
   persist_config(a);
   if (a->log) {
     a->log->info(std::string("Location: ") + a->cfg.city + ", " + a->cfg.country);
@@ -450,6 +451,7 @@ void detect_location(App* a) {
   a->cfg.latitude = pick->latitude;
   a->cfg.longitude = pick->longitude;
   a->cfg.timezone = pick->timezone;
+  apply_islamicfinder_place(&a->cfg);
   persist_config(a);
   fill_locations(a);
   int64_t now_ms = SystemClock().now_ms();
@@ -500,6 +502,10 @@ void refresh_ui(App* a) {
   char coords[80];
   std::snprintf(coords, sizeof(coords), "%.4f, %.4f", a->cfg.latitude, a->cfg.longitude);
   set_text(a->hwnd, IDC_COORDS, coords);
+  if (a->cache && a->cache->has_schedule())
+    set_text_w(a->hwnd, IDC_SOURCE, ui::source_text(a->cache->schedule().source));
+  else
+    set_text_w(a->hwnd, IDC_SOURCE, L"");
 
   PrayerId pid;
   if (!st.next_prayer_name.empty() && prayer_id_from_name(st.next_prayer_name, &pid)) {
@@ -512,7 +518,7 @@ void refresh_ui(App* a) {
     set_text_w(a->hwnd, IDC_NEXT_NAME, ui::status_no_remaining());
     set_text_w(a->hwnd, IDC_NEXT_TIME, L"");
   }
-  SetDlgItemTextW(a->hwnd, IDC_TOGGLE, a->cfg.enabled ? ui::active() : ui::inactive());
+  SetDlgItemTextW(a->hwnd, IDC_TOGGLE, ui::toggle_action(a->cfg.enabled));
   update_tray_tip(a);
   update_fade_timers(a);
 }
@@ -588,14 +594,16 @@ void add_tray(App* a) {
 void remove_tray(App* a) { Shell_NotifyIconW(NIM_DELETE, &a->nid); }
 
 void layout_window(HWND hwnd) {
-  make_label(hwnd, IDC_TITLE, ui::app_title(), 20, 12, 440, 28, true);
+  make_label(hwnd, IDC_TITLE, ui::app_title(), 20, 12, 300, 28, true);
+  make_label(hwnd, IDC_VERSION, ui::app_version().c_str(), 330, 18, 120, 20, false);
   make_label(hwnd, 0, ui::status_label(), 20, 52, 120, 18, false);
   make_label(hwnd, IDC_STATUS, ui::active(), 20, 72, 400, 22, false);
 
   make_label(hwnd, 0, ui::location_label(), 20, 108, 200, 18, false);
   make_combo(hwnd, IDC_LOCATION, 20, 128, 300, 220);
   make_btn(hwnd, IDC_DETECT, ui::detect_location(), 330, 127, 120, 26);
-  make_label(hwnd, IDC_COORDS, L"", 20, 160, 400, 18, false);
+  make_label(hwnd, IDC_COORDS, L"", 20, 160, 200, 18, false);
+  make_label(hwnd, IDC_SOURCE, L"", 230, 160, 220, 18, false);
 
   make_label(hwnd, 0, ui::timezone_label(), 20, 188, 200, 18, false);
   make_label(hwnd, IDC_TIMEZONE, L"", 20, 208, 400, 20, false);
@@ -608,8 +616,8 @@ void layout_window(HWND hwnd) {
   make_label(hwnd, IDC_NEXT_NAME, ui::em_dash(), 20, 322, 400, 22, false);
   make_label(hwnd, IDC_NEXT_TIME, L"", 20, 346, 400, 22, false);
 
-  make_btn(hwnd, IDC_TOGGLE, ui::active(), 20, 390, 120, 36);
-  make_btn(hwnd, IDC_REFRESH, ui::refresh_times(), 150, 390, 160, 36);
+  make_btn(hwnd, IDC_TOGGLE, ui::disable_action(), 20, 390, 190, 36);
+  make_btn(hwnd, IDC_REFRESH, ui::refresh_times(), 220, 390, 210, 36);
   make_label(hwnd, IDC_HINT, ui::close_hint(), 20, 440, 430, 36, false);
 }
 
@@ -623,7 +631,7 @@ void on_create(HWND hwnd, App* a) {
 
   int64_t now_ms = SystemClock().now_ms();
   int64_t now = now_ms / 1000;
-  a->log->info("Application started");
+  a->log->info(std::string("Application started v") + kVersion);
   a->log->info(std::string("Location: ") + a->cfg.city + ", " + a->cfg.country);
   a->log->info(std::string("Timezone: ") + a->cfg.timezone);
   {
@@ -756,6 +764,9 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       SetBkMode(dc, TRANSPARENT);
       int id = GetDlgCtrlID((HWND)lParam);
       if (id == IDC_STATUS && a && a->cfg.enabled) SetTextColor(dc, RGB(16, 120, 48));
+      if (id == IDC_STATUS && a && !a->cfg.enabled) SetTextColor(dc, RGB(110, 110, 110));
+      if (id == IDC_VERSION) SetTextColor(dc, RGB(110, 110, 110));
+      if (id == IDC_SOURCE) SetTextColor(dc, RGB(80, 80, 80));
       if (id == IDC_TITLE) {
         SetTextColor(dc, RGB(20, 20, 20));
         SelectObject(dc, g_font_bold ? g_font_bold : g_font);
@@ -834,14 +845,15 @@ int run(HINSTANCE inst, int show) {
   app.vol = create_win_volume_controller(app.log);
   app.aladhan = new AladhanProvider(app.http, app.cfg.aladhan_endpoint);
   app.ifinder = new IslamicFinderProvider(app.http, app.cfg.islamicfinder_endpoint);
-  app.provider = new FallbackProvider(app.aladhan, app.ifinder);
+  app.ifinder->set_logger(app.log);
+  app.provider = new FallbackProvider(app.ifinder, app.aladhan, app.log);
   app.cache = new CacheManager(app.root, app.provider, app.log);
   app.cache->set_max_retries(kHttpMaxRetries);
   app.sched = new Scheduler(app.vol, app.log, app.root);
 
   HWND hwnd = CreateWindowExW(0, L"AdhanVolumeMainWnd", ui::app_title(),
                               WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                              CW_USEDEFAULT, CW_USEDEFAULT, 480, 530, 0, 0, inst, 0);
+                              CW_USEDEFAULT, CW_USEDEFAULT, 500, 530, 0, 0, inst, 0);
   if (!hwnd) return 1;
   ShowWindow(hwnd, show);
   UpdateWindow(hwnd);
