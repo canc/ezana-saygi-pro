@@ -26,6 +26,7 @@ struct Location {
   std::string timezone;
   double latitude;
   double longitude;
+  int islamicfinder_city_id = 0;
 
   bool valid() const;
   std::string display_name() const;
@@ -122,6 +123,7 @@ struct AppConfig {
   int fade_duration_ms;
   std::string aladhan_endpoint;
   std::string islamicfinder_endpoint;
+  int islamicfinder_city_id = 0;
   int http_timeout_ms;
 
   Location location() const;
@@ -133,6 +135,9 @@ bool valid_adhan_duration_seconds(int seconds);
 int clamp_adhan_duration_seconds(int seconds);
 
 AppConfig default_config();
+// Empty, retired /index.php/api/prayer_times, and .us hosts are not used as a JSON API.
+std::string canonical_islamicfinder_endpoint(const std::string& endpoint);
+bool islamicfinder_json_api_configured(const std::string& endpoint);
 
 struct HttpResult {
   bool ok;

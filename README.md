@@ -38,7 +38,7 @@ The window is in **Turkish** by default.
 2. Confirm **Zaman Dilimi** shows `Avrupa/İstanbul (GMT+3)`.
 3. Set **Ezan Vaktinden Önce**: 30 saniye, 1 dakika, or 2 dakika. Default is **1 dakika**.
 4. Use **Ezan Sürelerini Ayarla** to set each prayer’s Adhan length (defaults: İmsak 5 dk, Öğle 5 dk, İkindi 3 dk, Akşam 3 dk, Yatsı 7 dk).
-5. Use **Aktif / Pasif** to enable or disable automatic fading. Scheduling continues while the process is in the tray.
+5. Use **Devre Dışı Bırak** / **Etkinleştir** to disable or enable automatic fading. **Durum** shows **Aktif** or **Pasif**. Scheduling continues while the process is in the tray.
 
 The app does **not** add itself to Windows startup.
 
@@ -67,7 +67,7 @@ Each prayer has its own Adhan hold duration, configured under **Ezan Sürelerini
 
 ## Enable / disable and tray
 
-- **Aktif / Pasif** in the window enables or disables fading.
+- **Durum** shows **Aktif** or **Pasif**. The button is the action: **Devre Dışı Bırak** when active, **Etkinleştir** when passive. While **Pasif**, the app does not fade, mute, or restore volume from automation events.
 - Closing the window (X) **hides** it. The app keeps running in the system tray. No confirmation dialog.
 - Tray menu is only **Göster** (show window) and **Kapat** (quit).
 - Double-click the tray icon to show and focus the window (same as Göster).
@@ -76,20 +76,26 @@ Each prayer has its own Adhan hold duration, configured under **Ezan Sürelerini
 
 ## Prayer times API and cache
 
-Prayer times are loaded from a public HTTPS Awqat Salah API (Aladhan, Diyanet method for Turkey), with an Islamic Finder–compatible endpoint as fallback.
+Prayer times are loaded from **IslamicFinder.org** first. Aladhan is a fallback only.
 
-Daily times are **cached per location and calendar date**. The API is **not** called on a timer and is **not** called by the volume scheduler.
+1. Optional custom IslamicFinder JSON endpoint (if configured). The retired `/index.php/api/prayer_times` path is never called.
+2. The public IslamicFinder city page for the selected location (for example Isparta: `https://www.islamicfinder.org/world/turkey/311073/isparta-prayer-times/`).
+3. Aladhan (Diyanet method 13 for Türkiye) only if both IslamicFinder methods fail.
 
-The cache date and the daily check use **Europe/Istanbul**, not the Windows time zone and not the API server’s time zone.
+The retired `islamicfinder.us` host is not used. Saved configs that still point at it, or at `/index.php/api/prayer_times`, are ignored for the JSON API.
 
-Normal API contact:
+Daily times are **cached per location and calendar date**. The provider is **not** called on a timer and is **not** called by the volume scheduler. The cache records `source` as `islamicfinder` or `aladhan`. The main window shows **Kaynak: IslamicFinder** or **Kaynak: Aladhan**.
+
+The cache date and the daily check use **Europe/Istanbul**, not the Windows time zone and not the provider’s server time zone.
+
+Normal network contact:
 
 1. First launch (or today’s cache missing/invalid)
 2. Daily cache **check** at **03:10 Europe/Istanbul** — fetches only if today’s cache is missing
 3. Location/timezone change when that location has no cache for today
 4. Manual **Vakitleri Yenile** in the main window
 
-Restarting the same day with a valid cache performs **zero** API requests.
+Restarting the same day with a valid cache performs **zero** network requests.
 
 If the computer sleeps through 03:10, the check runs immediately on wake/start: fetch only if today’s cache is missing.
 
@@ -105,7 +111,7 @@ Logs: `%APPDATA%\AdhanVolume\logs\adhanvolume.log` (rotated, size-limited).
 
 | Problem | What to check |
 |---------|----------------|
-| Volume never fades | App must be **Aktif**, in the tray (not closed with **Kapat**), and a valid schedule must be loaded. Logs should show `Threshold reached` then `Starting fade-out` then `Setting master volume`. If the first is missing, the scheduler did not see the window; if fade-out is logged but volume does not change, the audio API failed. |
+| Volume never fades | App must be **Aktif** (click **Etkinleştir** if **Pasif**), in the tray (not closed with **Kapat**), and a valid schedule must be loaded. Logs should show `Threshold reached` then `Starting fade-out` then `Setting master volume`. If the first is missing, the scheduler did not see the window; if fade-out is logged but volume does not change, the audio API failed. |
 | Direct audio probe | Run `AdhanVolume.exe --volume-test`. This get/set/verify/restore test ignores prayer times. Results are logged and shown in a dialog. |
 | Verbose scheduler log | Run with `--debug` (or set `ADHAN_DEBUG=1`). High-frequency ticks are otherwise limited to the last ~2 minutes before an event. |
 | Windows 10 ARM: EXE will not start | Use `AdhanVolume-arm64.exe` or `AdhanVolume-x86.exe`. The x64 build cannot run on Windows 10 ARM. |

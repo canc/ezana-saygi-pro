@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "logger.h"
 #include "types.h"
 
 namespace adhan {
@@ -12,9 +13,10 @@ class PrayerTimeProvider {
   virtual const char* name() const = 0;
   virtual bool fetch_daily(const Location& loc, const CalendarDate& date, int timeout_ms,
                            PrayerSchedule* out, std::string* err) = 0;
+  virtual void set_logger(Logger* log) { (void)log; }
 };
 
-// Compatible public Awqat Salah API (Aladhan). No API key required.
+// Public Awqat Salah API. Used only when IslamicFinder cannot provide times.
 class AladhanProvider : public PrayerTimeProvider {
  public:
   AladhanProvider(HttpClient* http, std::string endpoint);
@@ -27,33 +29,66 @@ class AladhanProvider : public PrayerTimeProvider {
   std::string endpoint_;
 };
 
-// Optional Islamic Finder compatible endpoint. Used as fallback.
+// Optional machine-readable IslamicFinder JSON endpoint (never the retired
+// /index.php/api/prayer_times path). Empty endpoint means "not configured".
+class IslamicFinderApiClient {
+ public:
+  IslamicFinderApiClient(HttpClient* http, std::string json_endpoint);
+  bool fetch(const Location& loc, const CalendarDate& date, int timeout_ms, PrayerSchedule* out,
+             std::string* err);
+
+ private:
+  HttpClient* http_;
+  std::string json_endpoint_;
+};
+
+// Single targeted GET of the public city prayer-times page on islamicfinder.org.
+class IslamicFinderPageClient {
+ public:
+  explicit IslamicFinderPageClient(HttpClient* http);
+  bool fetch(const Location& loc, const CalendarDate& date, int timeout_ms, PrayerSchedule* out,
+             std::string* err);
+
+ private:
+  HttpClient* http_;
+  bool resolve_page_url(const Location& loc, int timeout_ms, std::string* url, std::string* err);
+};
+
+// Primary provider: JSON API (if configured), then the public city page.
 class IslamicFinderProvider : public PrayerTimeProvider {
  public:
-  IslamicFinderProvider(HttpClient* http, std::string endpoint);
+  IslamicFinderProvider(HttpClient* http, std::string json_endpoint);
   const char* name() const override { return "IslamicFinder"; }
+  void set_logger(Logger* log) override { log_ = log; }
   bool fetch_daily(const Location& loc, const CalendarDate& date, int timeout_ms,
                    PrayerSchedule* out, std::string* err) override;
 
  private:
-  HttpClient* http_;
-  std::string endpoint_;
+  IslamicFinderApiClient api_;
+  IslamicFinderPageClient page_;
+  Logger* log_;
 };
 
 class FallbackProvider : public PrayerTimeProvider {
  public:
-  FallbackProvider(PrayerTimeProvider* primary, PrayerTimeProvider* secondary);
+  FallbackProvider(PrayerTimeProvider* primary, PrayerTimeProvider* secondary, Logger* log = 0);
   const char* name() const override { return "Fallback"; }
+  void set_logger(Logger* log) override { log_ = log; }
   bool fetch_daily(const Location& loc, const CalendarDate& date, int timeout_ms,
                    PrayerSchedule* out, std::string* err) override;
 
  private:
   PrayerTimeProvider* primary_;
   PrayerTimeProvider* secondary_;
+  Logger* log_;
 };
 
 std::string url_encode(const std::string& s);
 int calculation_method_for_location(const Location& loc);
 bool parse_prayer_timings_object(const class Json& timings, PrayerSchedule* out, std::string* err);
+bool parse_islamicfinder_json_body(const std::string& body, PrayerSchedule* out, std::string* err);
+bool parse_islamicfinder_page_html(const std::string& html, PrayerSchedule* out, std::string* err);
+bool parse_islamicfinder_page_html(const std::string& html, const CalendarDate& date,
+                                   PrayerSchedule* out, std::string* err);
 
 }  // namespace adhan

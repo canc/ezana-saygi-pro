@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -59,11 +60,29 @@ struct FakeHttp : HttpClient {
   int status;
   std::string body;
   std::string last_url;
+  std::vector<std::string> urls;
+  struct Route {
+    std::string needle;
+    int status;
+    std::string body;
+    bool fail;
+  };
+  std::vector<Route> routes;
   FakeHttp() : calls(0), fail(false), status(200) {}
   HttpResult get(const std::string& url, int) override {
     ++calls;
     last_url = url;
+    urls.push_back(url);
     HttpResult r;
+    for (size_t i = 0; i < routes.size(); ++i) {
+      if (url.find(routes[i].needle) != std::string::npos) {
+        r.ok = !routes[i].fail;
+        r.status = routes[i].fail ? 0 : routes[i].status;
+        r.body = routes[i].fail ? "" : routes[i].body;
+        r.error = routes[i].fail ? "network down" : "";
+        return r;
+      }
+    }
     r.ok = !fail;
     r.status = fail ? 0 : status;
     r.body = fail ? "" : body;
@@ -210,6 +229,10 @@ static void test_timezone() {
   int h, m;
   CHECK(parse_hhmm("19:23", &h, &m) && h == 19 && m == 23);
   CHECK(parse_hhmm("04:56 (EEST)", &h, &m) && h == 4 && m == 56);
+  CHECK(parse_hhmm("04:57 AM", &h, &m) && h == 4 && m == 57);
+  CHECK(parse_hhmm("12:58 PM", &h, &m) && h == 12 && m == 58);
+  CHECK(parse_hhmm("07:28 PM", &h, &m) && h == 19 && m == 28);
+  CHECK(parse_hhmm("12:01 AM", &h, &m) && h == 0 && m == 1);
   CHECK(!parse_hhmm("25:00", &h, &m));
 
   std::string disp = timezone_display("Europe/Istanbul", k1000_ist);
@@ -225,6 +248,48 @@ static void test_fade() {
   CHECK(std::fabs(fade_volume(0.f, 0.67f, 4000, 4000, &done) - 0.67f) < 0.001f);
   CHECK(done);
 }
+
+static Location isparta() {
+  Location loc;
+  loc.country = "Turkey";
+  loc.city = "Isparta";
+  loc.timezone = "Europe/Istanbul";
+  loc.latitude = 37.7648;
+  loc.longitude = 30.5566;
+  apply_islamicfinder_place(&loc);
+  return loc;
+}
+
+static std::string if_page_html() {
+  return "<html><head><meta name=\"description\" content='Today Prayer Times in Isparta, "
+         "Isparta, Turkey are Fajar Prayer Time 04:57 AM, Dhuhur Prayer Time 12:58 PM, Asr "
+         "Prayer Time 04:37 PM, Maghrib Prayer Time 07:28 PM & Isha Prayer Time 08:54 PM.'>"
+         "</head><body>"
+         "<div class=\"prayerTiles fajar-tile\"><span class=\"prayertime "
+         "pt-tile-time\">04:57 AM</span></div>"
+         "<div class=\"prayerTiles sunrise-tile\"><span class=\"prayertime "
+         "pt-tile-time\">06:27 AM</span></div>"
+         "<div class=\"prayerTiles dhuhar-tile\"><span class=\"prayertime "
+         "pt-tile-time\">12:58 PM</span></div>"
+         "<div class=\"prayerTiles asr-tile\"><span class=\"prayertime "
+         "pt-tile-time\">04:37 PM</span></div>"
+         "<div class=\"prayerTiles maghrib-tile\"><span class=\"prayertime "
+         "pt-tile-time\">07:28 PM</span></div>"
+         "<div class=\"prayerTiles isha-tile\"><span class=\"prayertime "
+         "pt-tile-time\">08:54 PM</span></div>"
+         "</body></html>";
+}
+
+static const char* kIfJson =
+    "{\"success\":true,\"results\":{\"Fajr\":\"04:56\",\"Sunrise\":\"06:20\",\"Dhuhr\":\"13:"
+    "03\",\"Asr\":\"16:41\",\"Maghrib\":\"19:34\",\"Isha\":\"20:53\"}}";
+
+static const char* kAladhanJson =
+    "{\"code\":200,\"status\":\"OK\",\"data\":{\"timings\":{\"Fajr\":\"04:56\",\"Sunrise\":\"06:"
+    "20\",\"Dhuhr\":\"13:03\",\"Asr\":\"16:41\",\"Sunset\":\"19:34\",\"Maghrib\":\"19:34\","
+    "\"Isha\":\"20:53\"},\"date\":{\"gregorian\":{\"date\":\"31-08-2026\",\"year\":\"2026\","
+    "\"month\":{\"number\":8},\"day\":\"31\"}},\"meta\":{\"timezone\":\"Europe/"
+    "Istanbul\",\"latitude\":36.8969,\"longitude\":30.6966}}}";
 
 static void test_aladhan_parse() {
   FakeHttp http;
@@ -253,11 +318,285 @@ static void test_aladhan_parse() {
   CHECK(!p.fetch_daily(antalya(), d, 1000, &s, &err));
 }
 
+static void test_islamicfinder_parse() {
+  CalendarDate d;
+  d.year = 2026;
+  d.month = 8;
+  d.day = 31;
+  PrayerSchedule s;
+  std::string err;
+
+  CHECK(parse_islamicfinder_page_html(if_page_html(), &s, &err));
+  CHECK_EQ(s.prayers[PRAYER_FAJR].hour, 4);
+  CHECK_EQ(s.prayers[PRAYER_FAJR].minute, 57);
+  CHECK_EQ(s.prayers[PRAYER_DHUHR].hour, 12);
+  CHECK_EQ(s.prayers[PRAYER_DHUHR].minute, 58);
+  CHECK_EQ(s.prayers[PRAYER_ASR].hour, 16);
+  CHECK_EQ(s.prayers[PRAYER_ASR].minute, 37);
+  CHECK_EQ(s.prayers[PRAYER_MAGHRIB].hour, 19);
+  CHECK_EQ(s.prayers[PRAYER_MAGHRIB].minute, 28);
+  CHECK_EQ(s.prayers[PRAYER_ISHA].hour, 20);
+  CHECK_EQ(s.prayers[PRAYER_ISHA].minute, 54);
+  CHECK(s.prayers[PRAYER_SUNRISE].valid);
+  CHECK_EQ(s.prayers[PRAYER_SUNRISE].hour, 6);
+
+  CHECK(parse_islamicfinder_json_body(
+      "{\"results\":{\"Fajar\":\"04:56 AM\",\"Dhuhur\":\"01:03 PM\",\"Asr\":\"04:41 PM\","
+      "\"Maghrib\":\"07:34 PM\",\"Isha\":\"08:53 PM\"}}",
+      &s, &err));
+  CHECK_EQ(s.prayers[PRAYER_FAJR].hour, 4);
+  CHECK_EQ(s.prayers[PRAYER_FAJR].minute, 56);
+  CHECK_EQ(s.prayers[PRAYER_DHUHR].hour, 13);
+  CHECK_EQ(s.prayers[PRAYER_MAGHRIB].hour, 19);
+
+  Location isp = isparta();
+  CHECK_EQ(isp.islamicfinder_city_id, 311073);
+  const CityInfo* place = islamicfinder_place_for_location(isp);
+  CHECK(place);
+  std::string page_url = islamicfinder_prayer_page_url(*place);
+  CHECK(page_url.find("islamicfinder.org/world/turkey/311073/isparta-prayer-times/") !=
+        std::string::npos);
+  CHECK(page_url.find("islamicfinder.us") == std::string::npos);
+  CHECK(page_url.find("index.php/api/prayer_times") == std::string::npos);
+
+  // Embedded JSON is preferred over tile text.
+  {
+    std::string html =
+        "<html><head><script type=\"application/json\">{\"results\":{\"Fajr\":\"04:50 AM\","
+        "\"Dhuhr\":\"01:00 PM\",\"Asr\":\"04:10 PM\",\"Maghrib\":\"07:10 PM\",\"Isha\":\"08:40 PM\"}"
+        "}</script></head><body>" +
+        if_page_html() + "</body></html>";
+    CHECK(parse_islamicfinder_page_html(html, &s, &err));
+    CHECK_EQ(s.prayers[PRAYER_FAJR].hour, 4);
+    CHECK_EQ(s.prayers[PRAYER_FAJR].minute, 50);
+    CHECK_EQ(s.prayers[PRAYER_MAGHRIB].hour, 19);
+    CHECK_EQ(s.prayers[PRAYER_MAGHRIB].minute, 10);
+  }
+
+  // Monthly table row for the requested Europe/Istanbul date, not the "today" tiles.
+  {
+    CalendarDate sept2;
+    sept2.year = 2026;
+    sept2.month = 9;
+    sept2.day = 2;
+    std::string html =
+        "<html><head></head><body>"
+        "<span class=\"pt-date-gregorian\">1&nbsp;September,&nbsp;2026</span>"
+        "<div class=\"prayerTiles fajar-tile\"><span class=\"pt-tile-time\">04:57 AM</span></div>"
+        "<div class=\"prayerTiles dhuhar-tile\"><span class=\"pt-tile-time\">12:58 PM</span></div>"
+        "<div class=\"prayerTiles asr-tile\"><span class=\"pt-tile-time\">04:37 PM</span></div>"
+        "<div class=\"prayerTiles maghrib-tile\"><span class=\"pt-tile-time\">07:28 PM</span></div>"
+        "<div class=\"prayerTiles isha-tile\"><span class=\"pt-tile-time\">08:54 PM</span></div>"
+        "<table id=\"monthly-prayers\"><thead><tr>"
+        "<th>September</th><th>Rabi</th><th class=\"d-none\">Day</th>"
+        "<th>Fajr</th><th>Sunrise</th><th>Dhuhr</th><th>Asr</th><th>Maghrib</th><th>Isha</th>"
+        "</tr></thead><tbody>"
+        "<tr class=\"tr-active\"><th class=\"th-date\">01 <span>Tue</span></th><th>19</th>"
+        "<td class=\"d-none\">Tue</td><td>04:57 AM</td><td>06:27 AM</td><td>12:58 PM</td>"
+        "<td>04:37 PM</td><td>07:28 PM</td><td>08:54 PM</td></tr>"
+        "<tr><th class=\"th-date\">02 <span>Wed</span></th><th>20</th>"
+        "<td class=\"d-none\">Wed</td><td>04:58 AM</td><td>06:28 AM</td><td>12:58 PM</td>"
+        "<td>04:37 PM</td><td>07:26 PM</td><td>08:52 PM</td></tr>"
+        "</tbody></table></body></html>";
+    CHECK(parse_islamicfinder_page_html(html, sept2, &s, &err));
+    CHECK_EQ(s.prayers[PRAYER_FAJR].minute, 58);
+    CHECK_EQ(s.prayers[PRAYER_MAGHRIB].minute, 26);
+    CHECK_EQ(s.prayers[PRAYER_ISHA].minute, 52);
+  }
+
+  // Case A — IslamicFinder JSON API succeeds; page and Aladhan are not used.
+  {
+    FakeHttp http;
+    http.routes.push_back(
+        FakeHttp::Route{"if-json", 200, kIfJson, false});
+    http.routes.push_back(FakeHttp::Route{"world/", 200, if_page_html(), false});
+    http.routes.push_back(FakeHttp::Route{"aladhan", 200, kAladhanJson, false});
+    IslamicFinderProvider ifinder(&http, "https://www.islamicfinder.org/if-json");
+    AladhanProvider aladhan(&http, kDefaultAladhanEndpoint);
+    FallbackProvider fb(&ifinder, &aladhan);
+    CHECK(fb.fetch_daily(isp, d, 1000, &s, &err));
+    CHECK(s.source == kSourceIslamicFinder);
+    CHECK_EQ(http.calls, 1);
+    CHECK(http.last_url.find("if-json") != std::string::npos);
+    CHECK(http.last_url.find("islamicfinder.us") == std::string::npos);
+  }
+
+  // Case B — API unavailable, public page succeeds; Aladhan is not used.
+  {
+    FakeHttp http;
+    http.routes.push_back(FakeHttp::Route{"world/", 200, if_page_html(), false});
+    http.routes.push_back(FakeHttp::Route{"aladhan", 200, kAladhanJson, false});
+    IslamicFinderProvider ifinder(&http, "");
+    AladhanProvider aladhan(&http, kDefaultAladhanEndpoint);
+    FallbackProvider fb(&ifinder, &aladhan);
+    CHECK(fb.fetch_daily(isp, d, 1000, &s, &err));
+    CHECK(s.source == kSourceIslamicFinder);
+    CHECK_EQ(s.prayers[PRAYER_MAGHRIB].hour, 19);
+    CHECK_EQ(s.prayers[PRAYER_MAGHRIB].minute, 28);
+    CHECK_EQ(http.calls, 1);
+    CHECK(http.last_url.find("/world/turkey/311073/isparta-prayer-times/") != std::string::npos);
+    for (size_t i = 0; i < http.urls.size(); ++i) {
+      CHECK(http.urls[i].find("aladhan") == std::string::npos);
+      CHECK(http.urls[i].find("islamicfinder.us") == std::string::npos);
+      CHECK(http.urls[i].find("index.php/api/prayer_times") == std::string::npos);
+    }
+  }
+
+  // Retired JSON path is skipped; page is used.
+  {
+    FakeHttp http;
+    http.routes.push_back(FakeHttp::Route{"world/", 200, if_page_html(), false});
+    IslamicFinderProvider ifinder(
+        &http, "https://www.islamicfinder.us/index.php/api/prayer_times");
+    CHECK(ifinder.fetch_daily(isp, d, 1000, &s, &err));
+    CHECK(s.source == kSourceIslamicFinder);
+    CHECK_EQ(http.calls, 1);
+    CHECK(http.last_url.find("world/") != std::string::npos);
+    CHECK(http.last_url.find("index.php/api/prayer_times") == std::string::npos);
+  }
+
+  // API 404, public page succeeds; Aladhan is not used.
+  {
+    FakeHttp http;
+    http.routes.push_back(FakeHttp::Route{"if-json", 404, "<html>nope</html>", false});
+    http.routes.push_back(FakeHttp::Route{"world/", 200, if_page_html(), false});
+    http.routes.push_back(FakeHttp::Route{"aladhan", 200, kAladhanJson, false});
+    IslamicFinderProvider ifinder(&http, "https://www.islamicfinder.org/if-json");
+    AladhanProvider aladhan(&http, kDefaultAladhanEndpoint);
+    FallbackProvider fb(&ifinder, &aladhan);
+    CHECK(fb.fetch_daily(isp, d, 1000, &s, &err));
+    CHECK(s.source == kSourceIslamicFinder);
+    CHECK_EQ(s.prayers[PRAYER_FAJR].minute, 57);
+    CHECK_EQ(http.calls, 2);
+    CHECK(http.last_url.find("world/") != std::string::npos);
+    for (size_t i = 0; i < http.urls.size(); ++i)
+      CHECK(http.urls[i].find("aladhan") == std::string::npos);
+  }
+
+  // Coordinates / unknown city name resolve via the bundled IslamicFinder city table
+  // (nearest known city), not by concatenating the user string into a URL.
+  {
+    Location mystery;
+    mystery.country = "Turkey";
+    mystery.city = "Unknownville";
+    mystery.timezone = "Europe/Istanbul";
+    mystery.latitude = 37.7648;
+    mystery.longitude = 30.5566;
+    FakeHttp http;
+    http.routes.push_back(FakeHttp::Route{"world/", 200, if_page_html(), false});
+    IslamicFinderProvider ifinder(&http, "");
+    CHECK(ifinder.fetch_daily(mystery, d, 1000, &s, &err));
+    CHECK(s.source == kSourceIslamicFinder);
+    CHECK_EQ(http.calls, 1);
+    CHECK(http.last_url.find("/world/turkey/311073/isparta-prayer-times/") != std::string::npos);
+    CHECK(http.last_url.find("Unknownville") == std::string::npos);
+    CHECK(http.last_url.find("global-search") == std::string::npos);
+  }
+
+  // Case C — both IslamicFinder strategies fail; Aladhan is used.
+  {
+    FakeHttp http;
+    http.routes.push_back(FakeHttp::Route{"if-json", 404, "<html>nope</html>", false});
+    http.routes.push_back(FakeHttp::Route{"world/", 404, "<html>missing</html>", false});
+    http.routes.push_back(FakeHttp::Route{"aladhan", 200, kAladhanJson, false});
+    IslamicFinderProvider ifinder(&http, "https://www.islamicfinder.org/if-json");
+    AladhanProvider aladhan(&http, kDefaultAladhanEndpoint);
+    FallbackProvider fb(&ifinder, &aladhan);
+    CHECK(fb.fetch_daily(isp, d, 1000, &s, &err));
+    CHECK(s.source == kSourceAladhan);
+    CHECK(http.last_url.find("aladhan") != std::string::npos);
+    CHECK_EQ(http.calls, 3);
+  }
+
+  // Case D — all providers fail; no schedule.
+  {
+    FakeHttp http;
+    http.fail = true;
+    IslamicFinderProvider ifinder(&http, "https://www.islamicfinder.org/if-json");
+    AladhanProvider aladhan(&http, kDefaultAladhanEndpoint);
+    FallbackProvider fb(&ifinder, &aladhan);
+    CHECK(!fb.fetch_daily(isp, d, 1000, &s, &err));
+
+    FakeVolume vol;
+    Logger slog(make_tmpdir() + "/logs");
+    Scheduler sch(&vol, &slog, make_tmpdir());
+    AppConfig cfg = default_config();
+    cfg.enabled = true;
+    sch.set_config(cfg);
+    sch.set_schedule(s, false);
+    sch.evaluate(k1923_ist * 1000);
+    CHECK(vol.sets == 0);
+    CHECK(!sch.status().has_schedule);
+  }
+
+  // Access denied on the page falls through to Aladhan (no CAPTCHA bypass).
+  {
+    FakeHttp http;
+    http.routes.push_back(FakeHttp::Route{"world/", 403, "denied", false});
+    http.routes.push_back(FakeHttp::Route{"aladhan", 200, kAladhanJson, false});
+    IslamicFinderProvider ifinder(&http, "");
+    AladhanProvider aladhan(&http, kDefaultAladhanEndpoint);
+    FallbackProvider fb(&ifinder, &aladhan);
+    CHECK(fb.fetch_daily(isp, d, 1000, &s, &err));
+    CHECK(s.source == kSourceAladhan);
+  }
+}
+
 static CacheManager make_cache(const std::string& root, PrayerTimeProvider* p, Logger* log) {
   CacheManager c(root, p, log);
   c.set_max_retries(1);
   c.set_sleeper(noop_sleep);
   return c;
+}
+
+static void test_islamicfinder_cache() {
+  Location isp = isparta();
+  std::string root = make_tmpdir();
+  Logger log(root + "/logs");
+  FakeHttp http;
+  http.routes.push_back(FakeHttp::Route{"world/", 200, if_page_html(), false});
+  http.routes.push_back(FakeHttp::Route{"aladhan", 200, kAladhanJson, false});
+  IslamicFinderProvider ifinder(&http, "");
+  AladhanProvider aladhan(&http, kDefaultAladhanEndpoint);
+  FallbackProvider fb(&ifinder, &aladhan);
+  CacheManager c = make_cache(root, &fb, &log);
+  CacheEnsureResult r = c.ensure_today(isp, k0300_ist, false);
+  CHECK(r.have_schedule);
+  CHECK(r.did_api_request);
+  CHECK(r.schedule.source == kSourceIslamicFinder);
+  CHECK_EQ(http.calls, 1);
+  int after_first = http.calls;
+
+  CacheManager c2 = make_cache(root, &fb, &log);
+  CacheEnsureResult r2 = c2.ensure_today(isp, k1000_ist, false);
+  CHECK(r2.have_schedule);
+  CHECK(r2.used_cache);
+  CHECK(!r2.did_api_request);
+  CHECK(r2.schedule.source == kSourceIslamicFinder);
+  CHECK_EQ(http.calls, after_first);
+
+  CacheEnsureResult tick = c.on_tick(isp, k0310);
+  CHECK(tick.have_schedule);
+  CHECK(!tick.did_api_request);
+  CHECK_EQ(http.calls, after_first);
+
+  std::string root_miss = make_tmpdir();
+  Logger log_miss(root_miss + "/logs");
+  FakeHttp http_miss;
+  http_miss.routes.push_back(FakeHttp::Route{"world/", 200, if_page_html(), false});
+  http_miss.routes.push_back(FakeHttp::Route{"aladhan", 200, kAladhanJson, false});
+  IslamicFinderProvider ifinder_miss(&http_miss, "");
+  AladhanProvider aladhan_miss(&http_miss, kDefaultAladhanEndpoint);
+  FallbackProvider fb_miss(&ifinder_miss, &aladhan_miss);
+  CacheManager cmiss = make_cache(root_miss, &fb_miss, &log_miss);
+  CacheEnsureResult miss = cmiss.ensure_today(isp, k0310, false);
+  CHECK(miss.have_schedule);
+  CHECK(miss.did_api_request);
+  CHECK(miss.schedule.source == kSourceIslamicFinder);
+  CHECK(http_miss.urls.size() > 0);
+  CHECK(http_miss.urls[0].find("islamicfinder.org/world/") != std::string::npos);
+  for (size_t i = 0; i < http_miss.urls.size(); ++i)
+    CHECK(http_miss.urls[i].find("aladhan") == std::string::npos);
 }
 
 static void test_cache_scenarios() {
@@ -509,6 +848,16 @@ static void test_scheduler() {
   sch2.set_schedule(s, true);
   sch2.evaluate(t1922);
   CHECK(std::fabs(vol2.vol - 0.65f) < 0.001f);
+  CHECK(sch2.status().next_prayer_name == "Maghrib");
+  CHECK_EQ(vol2.sets, 0);
+
+  // Re-enable with the cached schedule: no extra provider call; existing rules apply.
+  sch2.set_enabled(true, t1921);
+  CHECK(std::fabs(vol2.vol - 0.65f) < 0.001f);
+  CHECK(sch2.status().state == ST_WAITING_FOR_THRESHOLD);
+  sch2.evaluate(t1922);
+  CHECK(sch2.status().state == ST_FADING_OUT);
+  CHECK(vol2.sets > 0);
 
   // Volume already 0
   FakeVolume vol3;
@@ -679,6 +1028,10 @@ static void test_config_roundtrip() {
   CHECK(saved.find("adhan_duration_seconds") == std::string::npos);
   CHECK(saved.find("\"imsak\"") != std::string::npos);
   CHECK(saved.find("\"maghrib\"") != std::string::npos);
+  CHECK(saved.find("islamicfinder.us") == std::string::npos);
+  CHECK(std::string(kDefaultIslamicFinderEndpoint).find("islamicfinder.us") == std::string::npos);
+  CHECK(std::string(kIslamicFinderOrigin).find("islamicfinder.org") != std::string::npos);
+  CHECK_EQ(d.islamicfinder_city_id, 323786);
 
   // Legacy global duration + retired 3-minute threshold.
   std::string legacy =
@@ -695,6 +1048,12 @@ static void test_config_roundtrip() {
   CHECK_EQ(e.adhan_duration_for(PRAYER_FAJR), 120);
   CHECK_EQ(e.adhan_duration_for(PRAYER_DHUHR), 120);
   CHECK_EQ(e.adhan_duration_for(PRAYER_ISHA), 120);
+  CHECK(e.islamicfinder_endpoint.empty());
+  CHECK(e.islamicfinder_endpoint.find("islamicfinder.us") == std::string::npos);
+  CHECK(canonical_islamicfinder_endpoint(
+            "https://www.islamicfinder.us/index.php/api/prayer_times")
+            .empty());
+  CHECK_EQ(e.islamicfinder_city_id, 323777);
 
   std::string partial =
       "{\"version\":2,\"enabled\":true,\"country\":\"Turkey\",\"city\":\"Antalya\","
@@ -730,6 +1089,17 @@ static void test_i18n_turkish_default() {
   CHECK(std::wstring(adhan::ui::tray_exit()) == std::wstring(L"Kapat"));
   CHECK(std::wstring(adhan::ui::active()) == std::wstring(L"Aktif"));
   CHECK(std::wstring(adhan::ui::inactive()) == std::wstring(L"Pasif"));
+  CHECK(std::wstring(adhan::ui::enable_action()) == std::wstring(L"Etkinle\u015ftir"));
+  CHECK(std::wstring(adhan::ui::disable_action()) ==
+        std::wstring(L"Devre D\u0131\u015f\u0131 B\u0131rak"));
+  CHECK(std::wstring(adhan::ui::toggle_action(true)) ==
+        std::wstring(adhan::ui::disable_action()));
+  CHECK(std::wstring(adhan::ui::toggle_action(false)) ==
+        std::wstring(adhan::ui::enable_action()));
+  CHECK(adhan::ui::app_version() == std::wstring(L"v1.0.4"));
+  CHECK(std::string(kVersion) == "1.0.4");
+  CHECK(adhan::ui::source_text("islamicfinder").find(L"IslamicFinder") != std::wstring::npos);
+  CHECK(adhan::ui::source_text("aladhan").find(L"Aladhan") != std::wstring::npos);
   CHECK(std::wstring(adhan::ui::location_label()) == std::wstring(L"Konum"));
   CHECK(std::wstring(adhan::ui::app_title()) == std::wstring(L"Ezana Sayg\u0131 PRO"));
   CHECK(std::wstring(adhan::ui::prayer(PRAYER_FAJR)) == std::wstring(L"\u0130msak"));
@@ -749,6 +1119,8 @@ int main() {
   test_timezone();
   test_fade();
   test_aladhan_parse();
+  test_islamicfinder_parse();
+  test_islamicfinder_cache();
   test_cache_key();
   test_config_roundtrip();
   test_cache_scenarios();
