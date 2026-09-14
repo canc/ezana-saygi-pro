@@ -22,6 +22,7 @@
 #include "core/locations.h"
 #include "core/logger.h"
 #include "core/provider.h"
+#include "core/schedule.h"
 #include "core/scheduler.h"
 #include "core/timezone.h"
 #include "core/volume_diag.h"
@@ -138,6 +139,13 @@ void update_tray_tip(App* a) {
 }
 
 void apply_schedule(App* a, const PrayerSchedule& s, bool valid, int64_t now_ms) {
+  int64_t now = now_ms / 1000;
+  if (valid && s.valid() && a->sched->has_schedule() &&
+      is_stale_schedule(s, a->sched->schedule(), istanbul_date(now))) {
+    if (a->log) a->log->info("Ignoring stale prayer schedule result");
+    a->sched->evaluate(now_ms);
+    return;
+  }
   a->sched->set_config(a->cfg);
   a->sched->set_schedule(s, valid);
   a->sched->evaluate(now_ms);
@@ -543,13 +551,16 @@ void update_fade_timers(App* a) {
 void tick_scheduler(App* a) {
   int64_t now = SystemClock().now_unix();
   int64_t now_ms = SystemClock().now_ms();
-  CacheEnsureResult cr = a->cache->on_tick(a->cfg.location(), now);
-  if (cr.did_api_request && cr.have_schedule) {
-    apply_schedule(a, cr.schedule, true, now_ms);
-  } else if (cr.have_schedule) {
-    a->sched->set_schedule(cr.schedule, true);
+  CacheEnsureResult cr = a->cache->on_tick(a->cfg.location(), now, false);
+  if (cr.needs_network && !a->fetching) {
+    if (a->log) a->log->info("03:10 Europe/Istanbul: requesting today's prayer schedule");
+    start_fetch(a, false);
   }
-  a->sched->evaluate(now_ms);
+  if (cr.have_schedule) {
+    apply_schedule(a, cr.schedule, true, now_ms);
+  } else {
+    a->sched->evaluate(now_ms);
+  }
   refresh_ui(a);
 }
 
@@ -667,9 +678,15 @@ void on_fetch_done(App* a, FetchResultMsg* msg) {
   a->fetching = false;
   if (!msg) return;
   if (msg->result.have_schedule) {
+    bool used_stale_fallback = msg->result.did_api_request && msg->result.used_cache;
     apply_schedule(a, msg->result.schedule, true, SystemClock().now_ms());
-    if (a->log) a->log->info("Prayer schedule updated");
-    if (msg->force || (!msg->result.used_cache && msg->result.did_api_request)) {
+    if (a->log) {
+      if (used_stale_fallback)
+        a->log->warn("Refresh failed; retained previous valid cache (not a fresh install)");
+      else
+        a->log->info("Prayer schedule updated");
+    }
+    if (!used_stale_fallback && (msg->force || (!msg->result.used_cache && msg->result.did_api_request))) {
       if (!a->shown_schedule_balloon || msg->force) {
         balloon(a, ui::app_title(), ui::note_schedule_updated());
         a->shown_schedule_balloon = true;

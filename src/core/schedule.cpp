@@ -25,6 +25,44 @@ std::string make_event_id(const PrayerSchedule& s, PrayerId id) {
   return buf;
 }
 
+bool schedules_same_identity(const PrayerSchedule& a, const PrayerSchedule& b) {
+  if (a.cache_date_istanbul != b.cache_date_istanbul) return false;
+  if (a.location.timezone != b.location.timezone) return false;
+  if (normalize_coord(a.location.latitude) != normalize_coord(b.location.latitude)) return false;
+  if (normalize_coord(a.location.longitude) != normalize_coord(b.location.longitude)) return false;
+  for (int i = 0; i < PRAYER_COUNT; ++i) {
+    if (a.prayers[i].valid != b.prayers[i].valid) return false;
+    if (!a.prayers[i].valid) continue;
+    if (a.prayers[i].unix_utc != b.prayers[i].unix_utc) return false;
+    if (a.prayers[i].hour != b.prayers[i].hour || a.prayers[i].minute != b.prayers[i].minute)
+      return false;
+  }
+  return true;
+}
+
+bool is_stale_schedule(const PrayerSchedule& candidate, const PrayerSchedule& installed,
+                       const CalendarDate& today) {
+  if (!candidate.valid()) return true;
+  if (!installed.valid()) return false;
+  if (installed.location.timezone != candidate.location.timezone) return false;
+  if (normalize_coord(installed.location.latitude) != normalize_coord(candidate.location.latitude))
+    return false;
+  if (normalize_coord(installed.location.longitude) !=
+      normalize_coord(candidate.location.longitude))
+    return false;
+  if (installed.cache_date_istanbul != candidate.cache_date_istanbul) {
+    int64_t inst = istanbul_local_to_unix(installed.cache_date_istanbul, 0, 0, 0);
+    int64_t cand = istanbul_local_to_unix(candidate.cache_date_istanbul, 0, 0, 0);
+    if (inst > cand) return true;
+    if (installed.cache_date_istanbul == today && candidate.cache_date_istanbul != today) return true;
+    return false;
+  }
+  if (candidate.fetched_at_unix > 0 && installed.fetched_at_unix > 0 &&
+      candidate.fetched_at_unix < installed.fetched_at_unix)
+    return true;
+  return false;
+}
+
 bool fill_unix_times(PrayerSchedule* s) {
   if (!s) return false;
   if (s->version == 0) s->version = kScheduleVersion;

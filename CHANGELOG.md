@@ -8,6 +8,7 @@
 - The main window shows **Kaynak: Aladhan** or **Kaynak: IslamicFinder**.
 - Enable/disable control is action-oriented: status stays **Aktif** / **Pasif**; the button is **Devre Dışı Bırak** or **Etkinleştir**.
 - Application version is **1.0.4** (`v1.0.4` in the main window). Windows EXE Product Name remains **Ezana Saygı PRO**.
+- Long-running refresh: a successful startup, **Vakitleri Yenile**, or 03:10 update replaces the active in-memory schedule and rebuilds waiting volume events. Restart is not required. A late/older fetch cannot overwrite a newer calendar date. Failed 03:10 checks retry instead of being treated as done for the day.
 
 ## 1.0.3 — 2026-08-31
 

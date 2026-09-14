@@ -50,7 +50,9 @@ Application (Win32 UI thread + one HTTP worker)
     └── muted-speaker icon (16/32/48)
 ```
 
-The scheduler **never** calls the HTTP client. It reads an in-memory schedule filled by `CacheManager`.
+The scheduler **never** calls the HTTP client. It reads an in-memory schedule filled by `CacheManager`. A successful refresh (startup, **Vakitleri Yenile**, or 03:10) must replace that in-memory schedule **and** rebuild scheduler/timer state. Restarting the process is not required for new times to take effect.
+
+The Win32 timer calls `CacheManager::on_tick(..., allow_network=false)` so 03:10 never blocks the UI thread on HTTP. If today’s cache is missing, `needs_network` is set and the existing fetch worker runs `ensure_today`.
 
 ## Prayer times
 
@@ -89,9 +91,13 @@ Example: `Europe/Istanbul:36.8969:30.6966:2026-08-31`
 
 The **date** and the daily **check** are computed in **Europe/Istanbul (GMT+3)** from UTC timestamps. The Windows zone, hosting zone, and API server zone are ignored.
 
-At 03:10 Istanbul the app **validates** today’s cache. It contacts IslamicFinder (then Aladhan only if needed) only if that entry is missing or invalid.
+At 03:10 Istanbul the app **validates** today’s cache. It requests the API only if that entry is missing or invalid. A failed 03:10 check is **not** treated as a successful fresh install: `last_0310` is not marked complete, and the check retries after `kDailyCacheRetrySeconds` (5 minutes).
+
+If the process stays up across midnight, `on_tick` notices the calendar-date rollover. When today’s cache file already exists it is loaded immediately (no network). Otherwise yesterday’s in-memory schedule is kept until the 03:10 fetch. An older calendar date must never overwrite a newer in-memory schedule (a late HTTP completion cannot clobber today with yesterday).
 
 On startup, resume, or location change it also checks immediately — it does not wait until the next 03:10.
+
+`Scheduler::set_schedule` compares date, location, and unix prayer times. If they changed, any **waiting** event is dropped and `evaluate()` rebuilds fade/mute times from the new snapshot. A live fade/mute is aborted and restored only when the active prayer’s identity or unix time no longer matches. Identical ticks (same schedule) do not rebuild events.
 
 Retention: about 14 days of files; other locations are not deleted just because the user switched city.
 
@@ -124,4 +130,4 @@ The loop is `SetTimer` with an adaptive interval: about **1 second** when the ne
 
 ## Tests
 
-`tests/test_main.cpp` runs on the host (Linux) against the same core library: timezone/03:10 math, cache hit/miss, location switch, API failure, scheduler fade, mute-hold, clock-jump forward/back, volume self-test, sleep/wake style resume. `make test-tz` repeats the suite under several `TZ` values to prove cache dates do not use `localtime()`.
+`tests/test_main.cpp` runs on the host (Linux) against the same core library: timezone/03:10 math, cache hit/miss, location switch, API failure, scheduler fade, mute-hold, clock-jump forward/back, volume self-test, sleep/wake style resume, long-running refresh (manual + 03:10) without restart, date rollover, and stale fetch rejection. `make test-tz` repeats the suite under several `TZ` values to prove cache dates do not use `localtime()`.
