@@ -102,8 +102,69 @@ void Scheduler::set_config(const AppConfig& cfg) {
 }
 
 void Scheduler::set_schedule(const PrayerSchedule& s, bool valid) {
-  has_schedule_ = valid && s.valid();
-  if (has_schedule_) schedule_ = s;
+  bool ok = valid && s.valid();
+  bool same = has_schedule_ && ok && schedules_same_identity(schedule_, s);
+  if (ok) {
+    if (!same) {
+      schedule_ = s;
+      has_schedule_ = true;
+      log_schedule("Active prayer schedule replaced");
+      resync_active_for_new_schedule();
+    } else {
+      schedule_ = s;
+      has_schedule_ = true;
+    }
+    return;
+  }
+  if (has_schedule_ && log_) log_->info("Active prayer schedule cleared");
+  has_schedule_ = false;
+  if (has_active_ && !active_is_live()) clear_active();
+}
+
+bool Scheduler::active_is_live() const {
+  if (!has_active_ || !active_.captured) return false;
+  return active_.state == ST_FADING_OUT || active_.state == ST_MUTED ||
+         active_.state == ST_FADING_IN;
+}
+
+void Scheduler::log_schedule(const char* reason) const {
+  if (!log_) return;
+  if (reason && reason[0]) log_->info(reason);
+  if (!has_schedule_) {
+    log_->info("No prayer schedule is active");
+    return;
+  }
+  log_->info(std::string("Schedule date: ") + schedule_.cache_date_istanbul.iso());
+  log_->info(std::string("Schedule source: ") + schedule_.source);
+  char buf[160];
+  std::snprintf(buf, sizeof(buf), "Schedule location: %s, %s", schedule_.location.city.c_str(),
+                schedule_.location.country.c_str());
+  log_->info(buf);
+  if (schedule_.prayers[PRAYER_MAGHRIB].valid) {
+    std::snprintf(buf, sizeof(buf), "Maghrib: %02d:%02d", schedule_.prayers[PRAYER_MAGHRIB].hour,
+                  schedule_.prayers[PRAYER_MAGHRIB].minute);
+    log_->info(buf);
+  }
+}
+
+void Scheduler::resync_active_for_new_schedule() {
+  if (!has_active_) return;
+  if (!has_schedule_) {
+    if (active_is_live())
+      abort_and_restore(last_now_ms_, "schedule lost");
+    else
+      clear_active();
+    return;
+  }
+  if (active_is_live()) {
+    PrayerEvent fresh = make_event(active_.prayer);
+    if (fresh.id != active_.id || fresh.prayer_unix != active_.prayer_unix) {
+      abort_and_restore(last_now_ms_, "schedule replaced");
+    }
+    return;
+  }
+  if (log_) log_->info("Waiting prayer event rebuilt from new schedule");
+  clear_active();
 }
 
 void Scheduler::set_enabled(bool on, int64_t now_ms) {

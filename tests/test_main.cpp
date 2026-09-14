@@ -1249,6 +1249,219 @@ static void test_i18n_turkish_default() {
   CHECK(std::wstring(adhan::ui::country("Turkey")) == std::wstring(L"T\u00fcrkiye"));
 }
 
+static PrayerSchedule make_day_schedule(const Location& loc, const CalendarDate& d,
+                                        int maghrib_minute, int64_t fetched_at) {
+  FakeProvider p;
+  PrayerSchedule s;
+  std::string err;
+  CHECK(p.fetch_daily(loc, d, 0, &s, &err));
+  s.prayers[PRAYER_MAGHRIB].minute = maghrib_minute;
+  CHECK(fill_unix_times(&s));
+  s.fetched_at_unix = fetched_at;
+  return s;
+}
+
+static void apply_runtime(Scheduler* sch, const AppConfig& cfg, const PrayerSchedule& s,
+                          int64_t now_unix) {
+  sch->set_config(cfg);
+  sch->set_schedule(s, true);
+  sch->evaluate(now_unix * 1000);
+}
+
+static void test_runtime_refresh() {
+  Location loc = antalya();
+  AppConfig cfg = default_config();
+  cfg.threshold_seconds = 60;
+  cfg.fade_duration_ms = 4000;
+  cfg.enabled = true;
+
+  CalendarDate day1 = istanbul_date(k1000_ist);
+  CalendarDate day2 = istanbul_date(k0310_next);
+  CHECK_EQ(day1.day, 31);
+  CHECK_EQ(day2.day, 1);
+
+  PrayerSchedule s_old = make_day_schedule(loc, day1, 23, 100);
+  PrayerSchedule s_new = make_day_schedule(loc, day1, 36, 200);
+  CHECK(s_old.prayers[PRAYER_MAGHRIB].unix_utc != s_new.prayers[PRAYER_MAGHRIB].unix_utc);
+  CHECK(!schedules_same_identity(s_old, s_new));
+  CHECK(is_stale_schedule(s_old, s_new, day1));
+  CHECK(!is_stale_schedule(s_new, s_old, day1));
+
+  // Manual refresh while WAITING must rebuild the active event. UI/next-prayer
+  // and volume timing both follow the new unix times (restart not required).
+  {
+    std::string root = make_tmpdir();
+    Logger log(root + "/logs");
+    FakeVolume vol;
+    vol.vol = 0.65f;
+    Scheduler sch(&vol, &log, root);
+    int64_t t1820 = k1923_ist - 63 * 60;  // 18:20, waiting for Maghrib 19:23
+    apply_runtime(&sch, cfg, s_old, t1820);
+    CHECK(sch.status().state == ST_WAITING_FOR_THRESHOLD);
+    CHECK_EQ(sch.active().prayer_unix, s_old.prayers[PRAYER_MAGHRIB].unix_utc);
+    CHECK_EQ(sch.status().next_prayer_unix, s_old.prayers[PRAYER_MAGHRIB].unix_utc);
+
+    apply_runtime(&sch, cfg, s_new, t1820);
+    CHECK(sch.has_schedule());
+    CHECK(schedules_same_identity(sch.schedule(), s_new));
+    CHECK(sch.status().state == ST_WAITING_FOR_THRESHOLD);
+    CHECK_EQ(sch.active().prayer_unix, s_new.prayers[PRAYER_MAGHRIB].unix_utc);
+    CHECK_EQ(sch.status().next_prayer_unix, s_new.prayers[PRAYER_MAGHRIB].unix_utc);
+
+    int sets_before = vol.sets;
+    sch.evaluate((k1923_ist - 60) * 1000);  // 19:22 = old fade start
+    CHECK_EQ(vol.sets, sets_before);
+    CHECK(sch.status().state == ST_WAITING_FOR_THRESHOLD);
+
+    sch.evaluate((s_new.prayers[PRAYER_MAGHRIB].unix_utc - 60) * 1000);  // 19:35
+    CHECK(vol.sets > sets_before);
+    CHECK(sch.status().state == ST_FADING_OUT || sch.status().state == ST_MUTED);
+  }
+
+  // Same identity refresh must not drop a waiting event (periodic tick path).
+  {
+    std::string root = make_tmpdir();
+    Logger log(root + "/logs");
+    FakeVolume vol;
+    Scheduler sch(&vol, &log, root);
+    int64_t t1820 = k1923_ist - 63 * 60;
+    apply_runtime(&sch, cfg, s_old, t1820);
+    std::string id = sch.active().id;
+    apply_runtime(&sch, cfg, s_old, t1820);
+    CHECK(sch.active().id == id);
+    CHECK(sch.status().state == ST_WAITING_FOR_THRESHOLD);
+  }
+
+  // Long-running process: day-1 schedule in memory, 03:10 fetches day 2, scheduler
+  // next-prayer uses day-2 unix times without reconstructing CacheManager/Scheduler.
+  {
+    std::string root = make_tmpdir();
+    Logger log(root + "/logs");
+    FakeProvider prov;
+    FakeVolume vol;
+    CacheManager cache = make_cache(root, &prov, &log);
+    Scheduler sch(&vol, &log, root);
+    CacheEnsureResult day1_r = cache.ensure_today(loc, k1000_ist, false);
+    CHECK(day1_r.have_schedule);
+    CHECK(day1_r.did_api_request);
+    apply_runtime(&sch, cfg, day1_r.schedule, k1000_ist);
+    int64_t dhuhr_day1 = day1_r.schedule.prayers[PRAYER_DHUHR].unix_utc;
+    CHECK_EQ(sch.status().next_prayer_unix, dhuhr_day1);
+
+    int before = prov.calls;
+    CacheEnsureResult tick0310 = cache.on_tick(loc, k0310_next, true);
+    CHECK(tick0310.have_schedule);
+    CHECK(tick0310.did_api_request);
+    CHECK_EQ(prov.calls, before + 1);
+    CHECK(tick0310.schedule.cache_date_istanbul == day2);
+    apply_runtime(&sch, cfg, tick0310.schedule, k0310_next);
+    int64_t fajr_day2 = tick0310.schedule.prayers[PRAYER_FAJR].unix_utc;
+    int64_t dhuhr_day2 = tick0310.schedule.prayers[PRAYER_DHUHR].unix_utc;
+    CHECK(dhuhr_day2 != dhuhr_day1);
+    CHECK_EQ(sch.schedule().cache_date_istanbul.day, 1);
+    CHECK_EQ(sch.status().next_prayer_unix, fajr_day2);
+
+    int64_t day2_1000 = k1000_ist + 86400;
+    sch.evaluate(day2_1000 * 1000);
+    CHECK_EQ(sch.status().next_prayer_unix, dhuhr_day2);
+  }
+
+  // Date rollover before 03:10 loads today's on-disk cache without an API call.
+  {
+    std::string root = make_tmpdir();
+    Logger log(root + "/logs");
+    FakeProvider prov;
+    CacheManager writer = make_cache(root, &prov, &log);
+    CHECK(writer.ensure_today(loc, k0310_next, false).did_api_request);
+
+    CacheManager live = make_cache(root, &prov, &log);
+    CHECK(live.ensure_today(loc, k1000_ist, false).have_schedule);
+    CHECK(live.schedule().cache_date_istanbul == day1);
+    int calls_after_load = prov.calls;
+    int64_t t0100_day2 = k0310_next - 2 * 3600 - 10 * 60;  // 01:00 Sep 1
+    CacheEnsureResult rolled = live.on_tick(loc, t0100_day2, false);
+    CHECK(rolled.have_schedule);
+    CHECK(!rolled.did_api_request);
+    CHECK(!rolled.needs_network);
+    CHECK(rolled.schedule.cache_date_istanbul == day2);
+    CHECK_EQ(prov.calls, calls_after_load);
+  }
+
+  // 03:10 with allow_network=false (UI-thread path) requests a worker fetch when
+  // today's cache is missing, and does not mark the daily check complete.
+  {
+    std::string root = make_tmpdir();
+    Logger log(root + "/logs");
+    FakeProvider prov;
+    CacheManager c = make_cache(root, &prov, &log);
+    CHECK(c.ensure_today(loc, k1000_ist, false).have_schedule);
+    int before = prov.calls;
+    CacheEnsureResult due = c.on_tick(loc, k0310_next, false);
+    CHECK(due.needs_network);
+    CHECK(!due.did_api_request);
+    CHECK_EQ(prov.calls, before);
+    CHECK(c.schedule().cache_date_istanbul == day1);
+
+    CacheEnsureResult fetched = c.ensure_today(loc, k0310_next, false);
+    CHECK(fetched.have_schedule);
+    CHECK(fetched.did_api_request);
+    CHECK(fetched.schedule.cache_date_istanbul == day2);
+    CacheEnsureResult after = c.on_tick(loc, k0310_next, false);
+    CHECK(!after.needs_network);
+    CHECK(after.schedule.cache_date_istanbul == day2);
+  }
+
+  // Failed 03:10 does not report a successful fresh install and retries later.
+  {
+    std::string root = make_tmpdir();
+    Logger log(root + "/logs");
+    FakeProvider prov;
+    CacheManager c = make_cache(root, &prov, &log);
+    CHECK(c.ensure_today(loc, k1000_ist, false).have_schedule);
+    prov.fail = true;
+    CacheEnsureResult miss = c.on_tick(loc, k0310_next, true);
+    CHECK(miss.did_api_request);
+    CHECK(c.schedule().cache_date_istanbul == day1);
+    CHECK(c.next_0310_unix() == k0310_next + kDailyCacheRetrySeconds ||
+          c.next_0310_unix() > k0310_next);
+    CHECK(c.next_0310_unix() != k0310_next + 86400);
+    prov.fail = false;
+    CacheEnsureResult retry = c.on_tick(loc, c.next_0310_unix(), true);
+    CHECK(retry.have_schedule);
+    CHECK(retry.did_api_request);
+    CHECK(retry.schedule.cache_date_istanbul == day2);
+  }
+
+  // A late yesterday fetch must not overwrite today's in-memory schedule.
+  {
+    std::string root = make_tmpdir();
+    Logger log(root + "/logs");
+    FakeProvider prov;
+    CacheManager c = make_cache(root, &prov, &log);
+    CHECK(c.ensure_today(loc, k0310_next, false).schedule.cache_date_istanbul == day2);
+    CacheEnsureResult late = c.ensure_today(loc, k1000_ist, false);
+    CHECK(c.schedule().cache_date_istanbul == day2);
+    CHECK(late.schedule.cache_date_istanbul == day2);
+    CHECK(is_stale_schedule(s_old, c.schedule(), day2));
+  }
+
+  // Failed forced refresh keeps the previous cache and is not a fresh install.
+  {
+    std::string root = make_tmpdir();
+    Logger log(root + "/logs");
+    FakeProvider prov;
+    CacheManager c = make_cache(root, &prov, &log);
+    CacheEnsureResult ok = c.ensure_today(loc, k1000_ist, false);
+    int64_t maghrib = ok.schedule.prayers[PRAYER_MAGHRIB].unix_utc;
+    prov.fail = true;
+    CacheEnsureResult kept = c.ensure_today(loc, k1000_ist, true);
+    CHECK(kept.have_schedule);
+    CHECK(kept.did_api_request);
+    CHECK(kept.used_cache);
+    CHECK_EQ(kept.schedule.prayers[PRAYER_MAGHRIB].unix_utc, maghrib);
+  }
+}
+
 int main() {
   test_i18n_turkish_default();
   test_timezone();
@@ -1262,6 +1475,7 @@ int main() {
   test_config_roundtrip();
   test_cache_scenarios();
   test_scheduler();
+  test_runtime_refresh();
   std::printf("%d passed, %d failed\n", g_pass, g_fails);
   return g_fails ? 1 : 0;
 }

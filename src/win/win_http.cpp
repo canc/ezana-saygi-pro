@@ -16,6 +16,9 @@
 #ifndef WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2
 #define WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 0x00000800
 #endif
+#ifndef WINHTTP_FLAG_REFRESH
+#define WINHTTP_FLAG_REFRESH 0x00000100
+#endif
 #ifndef WINHTTP_OPTION_SECURE_PROTOCOLS
 #define WINHTTP_OPTION_SECURE_PROTOCOLS 84
 #endif
@@ -108,6 +111,7 @@ class WinHttpClient : public HttpClient {
     }
 
     DWORD flags = https ? WINHTTP_FLAG_SECURE : 0;
+    flags |= WINHTTP_FLAG_REFRESH;
     HINTERNET req = WinHttpOpenRequest(conn, L"GET", path.c_str(), NULL, WINHTTP_NO_REFERER,
                                        WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
     if (!req) {
@@ -117,8 +121,8 @@ class WinHttpClient : public HttpClient {
       return r;
     }
 
-    BOOL sent = WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0,
-                                   0, 0);
+    BOOL sent = WinHttpSendRequest(req, L"Cache-Control: no-cache\r\nPragma: no-cache\r\n", (DWORD)-1,
+                                   WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
     if (!sent || !WinHttpReceiveResponse(req, 0)) {
       r.error = "request failed (network/TLS)";
       WinHttpCloseHandle(req);

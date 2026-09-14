@@ -38,6 +38,9 @@ constexpr int kFadeTickMs = 100;
 constexpr int kMuteHoldTickMs = 1000;
 constexpr float kVolumeVerifyEpsilon = 0.03f;
 constexpr int kCacheRetentionDays = 14;
+// After a failed 03:10 fetch, wait before retrying so a missing cache cannot
+// hammer the network every scheduler tick.
+constexpr int kDailyCacheRetrySeconds = 300;
 constexpr int kHttpTimeoutMs = 15000;
 constexpr int kHttpMaxRetries = 3;
 constexpr int kLogMaxBytes = 512 * 1024;

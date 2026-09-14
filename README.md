@@ -95,6 +95,8 @@ Normal network contact:
 
 Restarting the same day with a valid cache performs **zero** network requests.
 
+A successful refresh (startup, **Vakitleri Yenile**, or 03:10) updates the active in-memory schedule and rebuilds volume-event timing. Restarting the application is **not** required for new prayer times to take effect.
+
 If the computer sleeps through 03:10, the check runs immediately on wake/start: fetch only if today’s cache is missing.
 
 ## Offline behavior
@@ -113,7 +115,7 @@ Logs: `%APPDATA%\AdhanVolume\logs\adhanvolume.log` (rotated, size-limited).
 | Direct audio probe | Run `AdhanVolume.exe --volume-test`. This get/set/verify/restore test ignores prayer times. Results are logged and shown in a dialog. |
 | Verbose scheduler log | Run with `--debug` (or set `ADHAN_DEBUG=1`). High-frequency ticks are otherwise limited to the last ~2 minutes before an event. |
 | Windows 10 ARM: EXE will not start | Use `AdhanVolume-arm64.exe` or `AdhanVolume-x86.exe`. The x64 build cannot run on Windows 10 ARM. |
-| Wrong prayer times | Confirm city and that timezone is Avrupa/İstanbul (GMT+3) for Türkiye. Use **Vakitleri Yenile**. |
+| Wrong prayer times after leaving the app running overnight | Confirm city and that timezone is Avrupa/İstanbul (GMT+3) for Türkiye. Use **Vakitleri Yenile**. Logs should show `Active prayer schedule replaced` and `Schedule date:` for today after 03:10; if they show a previous date, the refresh did not install. Restart is not required when those lines appear. |
 | Windows 7 TLS/HTTPS errors | Install Windows 7 updates that enable TLS 1.2 and modern root certificates. |
 | Volume stuck at 0 after a crash | Restart the app once; it restores the captured volume when the unfinished event has ended, unless you already changed the volume yourself. |
 | Two copies running | Only one instance is allowed; launching again focuses the existing window. |

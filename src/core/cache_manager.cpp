@@ -49,7 +49,9 @@ CacheManager::CacheManager(std::string root_dir, PrayerTimeProvider* provider, L
       fetch_in_progress_(false),
       max_retries_(kHttpMaxRetries),
       sleeper_(0),
-      api_attempts_(0) {
+      api_attempts_(0),
+      generation_(0),
+      last_network_attempt_unix_(0) {
   last_0310_date_.year = 0;
   last_0310_date_.month = 0;
   last_0310_date_.day = 0;
@@ -78,6 +80,44 @@ void CacheManager::log_info(const std::string& m) {
   if (log_) log_->info(m);
 }
 
+void CacheManager::log_warn(const std::string& m) {
+  if (log_) log_->warn(m);
+}
+
+void CacheManager::copy_memory_to_result(CacheEnsureResult* r) const {
+  if (!r) return;
+  r->have_schedule = has_memory_;
+  r->used_cache = has_memory_;
+  r->generation = generation_;
+  if (has_memory_) r->schedule = memory_;
+}
+
+bool CacheManager::install_memory(const PrayerSchedule& s, int64_t now_unix) {
+  if (!s.valid()) return false;
+  CalendarDate today = istanbul_date(now_unix);
+  if (has_memory_ && is_stale_schedule(s, memory_, today)) {
+    log_info("Ignoring stale prayer schedule (older than the active in-memory schedule)");
+    return false;
+  }
+  if (has_memory_ && schedules_same_identity(memory_, s) &&
+      memory_.fetched_at_unix == s.fetched_at_unix) {
+    return true;
+  }
+  memory_ = s;
+  has_memory_ = true;
+  ++generation_;
+  return true;
+}
+
+bool CacheManager::adopt_today_from_disk(const Location& loc, const CalendarDate& today,
+                                         int64_t now_unix) {
+  PrayerSchedule cached;
+  if (!load_key(loc, today, &cached)) return false;
+  if (!install_memory(cached, now_unix)) return has_memory_ && memory_.cache_date_istanbul == today;
+  log_info(std::string("Loaded today's prayer cache: ") + today.iso());
+  return true;
+}
+
 bool CacheManager::matches(const PrayerSchedule& s, const Location& loc,
                            const CalendarDate& date) const {
   if (!s.valid()) return false;
@@ -96,8 +136,7 @@ bool CacheManager::peek_today(const Location& loc, int64_t now_unix, PrayerSched
   CalendarDate today = istanbul_date(now_unix);
   if (next_0310_ == 0) next_0310_ = next_istanbul_0310(now_unix);
   if (!load_key(loc, today, out)) return false;
-  memory_ = *out;
-  has_memory_ = true;
+  install_memory(*out, now_unix);
   return true;
 }
 
@@ -121,8 +160,9 @@ bool CacheManager::save_key(const PrayerSchedule& s) {
   return write_file_atomic(path, schedule_to_json(s));
 }
 
-bool CacheManager::fetch_from_api(const Location& loc, const CalendarDate& date,
+bool CacheManager::fetch_from_api(const Location& loc, const CalendarDate& date, int64_t now_unix,
                                   PrayerSchedule* out, std::string* err) {
+  last_network_attempt_unix_ = now_unix;
   if (!provider_) {
     if (err) *err = "no provider";
     return false;
@@ -172,9 +212,6 @@ bool CacheManager::fetch_from_api(const Location& loc, const CalendarDate& date,
 CacheEnsureResult CacheManager::load_or_fetch(const Location& loc, int64_t now_unix,
                                               bool force_network, const char* reason) {
   CacheEnsureResult r;
-  r.have_schedule = false;
-  r.did_api_request = false;
-  r.used_cache = false;
 
   CalendarDate today = istanbul_date(now_unix);
   log_info(std::string("Current prayer timezone: ") + kAuthoritativeTimezone);
@@ -189,11 +226,8 @@ CacheEnsureResult CacheManager::load_or_fetch(const Location& loc, int64_t now_u
   if (have_cache && !force_network) {
     log_info("Daily prayer cache found");
     log_info("Using cached prayer schedule");
-    memory_ = cached;
-    has_memory_ = true;
-    r.have_schedule = true;
-    r.used_cache = true;
-    r.schedule = cached;
+    install_memory(cached, now_unix);
+    copy_memory_to_result(&r);
     return r;
   }
   if (!have_cache) log_info("Prayer cache missing");
@@ -202,25 +236,27 @@ CacheEnsureResult CacheManager::load_or_fetch(const Location& loc, int64_t now_u
   PrayerSchedule fetched;
   std::string err;
   r.did_api_request = true;
-  if (fetch_from_api(loc, today, &fetched, &err)) {
-    memory_ = fetched;
-    has_memory_ = true;
-    r.have_schedule = true;
-    r.schedule = fetched;
+  if (fetch_from_api(loc, today, now_unix, &fetched, &err)) {
+    if (!install_memory(fetched, now_unix)) {
+      copy_memory_to_result(&r);
+      return r;
+    }
+    copy_memory_to_result(&r);
+    r.used_cache = false;
     return r;
   }
   r.error = err;
   if (have_cache) {
     log_info("API failed; keeping last valid cache");
-    memory_ = cached;
-    has_memory_ = true;
-    r.have_schedule = true;
-    r.used_cache = true;
-    r.schedule = cached;
+    install_memory(cached, now_unix);
+    copy_memory_to_result(&r);
     r.did_api_request = true;
     return r;
   }
   log_info("No valid cache and API unavailable; no prayer schedule");
+  copy_memory_to_result(&r);
+  r.did_api_request = true;
+  r.used_cache = false;
   return r;
 }
 
@@ -230,38 +266,68 @@ CacheEnsureResult CacheManager::ensure_today(const Location& loc, int64_t now_un
   return load_or_fetch(loc, now_unix, force_network, force_network ? "manual" : "ensure");
 }
 
-CacheEnsureResult CacheManager::on_tick(const Location& loc, int64_t now_unix) {
+CacheEnsureResult CacheManager::on_tick(const Location& loc, int64_t now_unix, bool allow_network) {
   CacheEnsureResult r;
-  r.have_schedule = has_memory_;
-  r.did_api_request = false;
-  r.used_cache = has_memory_;
-  if (has_memory_) r.schedule = memory_;
-
+  CalendarDate today = istanbul_date(now_unix);
   if (next_0310_ == 0) next_0310_ = next_istanbul_0310(now_unix);
+
+  if (has_memory_ && memory_.cache_date_istanbul != today) {
+    log_info(std::string("Calendar date rolled over to ") + today.iso());
+    if (adopt_today_from_disk(loc, today, now_unix)) {
+      log_info("Using today's cached prayer schedule after date rollover");
+    } else {
+      log_info("Today's cache is not on disk yet; keeping previous schedule until 03:10 refresh");
+    }
+  }
+
+  copy_memory_to_result(&r);
   if (now_unix < next_0310_) return r;
 
-  CalendarDate today = istanbul_date(now_unix);
   if (last_0310_date_ == today) {
     next_0310_ = next_istanbul_0310(now_unix);
+    copy_memory_to_result(&r);
     return r;
   }
 
   log_info("Daily cache check triggered at 03:10 Europe/Istanbul");
-  last_0310_date_ = today;
-  PrayerSchedule cached;
-  if (load_key(loc, today, &cached)) {
+  r.daily_check_ran = true;
+
+  if (adopt_today_from_disk(loc, today, now_unix)) {
     log_info("Today's prayer cache already exists");
     log_info("No API request required");
-    memory_ = cached;
-    has_memory_ = true;
-    r.have_schedule = true;
-    r.used_cache = true;
-    r.schedule = cached;
-  } else {
-    log_info("Today's prayer cache is missing");
-    r = load_or_fetch(loc, now_unix, false, "03:10");
+    last_0310_date_ = today;
+    next_0310_ = next_istanbul_0310(now_unix);
+    copy_memory_to_result(&r);
+    return r;
   }
-  next_0310_ = next_istanbul_0310(now_unix);
+
+  log_info("Today's prayer cache is missing");
+  if (!allow_network) {
+    bool retry_ok = last_network_attempt_unix_ == 0 ||
+                    now_unix - last_network_attempt_unix_ >= kDailyCacheRetrySeconds;
+    if (retry_ok) {
+      r.needs_network = true;
+      log_info("03:10 check requires a network fetch");
+    } else {
+      log_info("03:10 network retry delayed after a recent failed attempt");
+    }
+    copy_memory_to_result(&r);
+    return r;
+  }
+
+  r = load_or_fetch(loc, now_unix, false, "03:10");
+  r.daily_check_ran = true;
+  if (r.have_schedule && r.schedule.cache_date_istanbul == today) {
+    last_0310_date_ = today;
+    next_0310_ = next_istanbul_0310(now_unix);
+  } else {
+    log_warn("03:10 prayer schedule refresh did not install today's schedule; will retry");
+    next_0310_ = now_unix + kDailyCacheRetrySeconds;
+    if (r.error == "fetch already in progress") {
+      r.needs_network = false;
+      next_0310_ = now_unix;  // retry on the next tick once the in-flight fetch finishes
+    }
+  }
   return r;
 }
 

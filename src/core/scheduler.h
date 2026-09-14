@@ -26,6 +26,8 @@ class Scheduler {
 
   void set_config(const AppConfig& cfg);
   void set_schedule(const PrayerSchedule& s, bool valid);
+  bool has_schedule() const { return has_schedule_; }
+  const PrayerSchedule& schedule() const { return schedule_; }
   void set_enabled(bool on, int64_t now_ms);
   void set_debug(bool on) { debug_ = on; }
   void evaluate(int64_t now_ms);
@@ -81,6 +83,9 @@ class Scheduler {
   std::string fmt_ms(int64_t epoch_ms) const;
   PrayerEvent make_event(PrayerId id) const;
   int64_t peek_next_fade_out_start_ms(int64_t now_ms) const;
+  bool active_is_live() const;
+  void resync_active_for_new_schedule();
+  void log_schedule(const char* reason) const;
 };
 
 }  // namespace adhan
