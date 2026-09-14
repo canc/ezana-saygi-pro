@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.5 — 2026-09-14
+
+- Application version is **1.0.5** (`v1.0.5` in the main window). Windows EXE Product Name remains **Ezana Saygı PRO**.
+- Release executables rebuilt: `dist/AdhanVolume.exe` / `AdhanVolume-x64.exe`, `AdhanVolume-x86.exe`, and `AdhanVolume-arm64.exe`.
+- Ships the long-running prayer-schedule refresh fix: a successful startup, **Vakitleri Yenile**, or 03:10 update replaces the active in-memory schedule and rebuilds waiting volume events. Restart is not required.
+
 ## 1.0.4 — 2026-09-01
 
 - **Aladhan is the primary prayer-time source**, using **method 13 (Diyanet İşleri Başkanlığı)** for Turkish locations. Requests send `city`, `country`, and `method=13` (Isparta example: `city=Isparta&country=Turkey&method=13`).

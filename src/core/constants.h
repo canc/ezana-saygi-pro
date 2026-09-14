@@ -4,7 +4,7 @@ namespace adhan {
 
 constexpr const char* kAppName = "Adhan Volume";
 constexpr const char* kAppFolderName = "AdhanVolume";
-constexpr const char* kVersion = "1.0.4";
+constexpr const char* kVersion = "1.0.5";
 constexpr const char* kMutexName = "Local\\AdhanVolumeSingleton";
 
 constexpr int kConfigVersion = 2;
