@@ -1231,8 +1231,8 @@ static void test_i18n_turkish_default() {
         std::wstring(adhan::ui::disable_action()));
   CHECK(std::wstring(adhan::ui::toggle_action(false)) ==
         std::wstring(adhan::ui::enable_action()));
-  CHECK(adhan::ui::app_version() == std::wstring(L"v1.0.4"));
-  CHECK(std::string(kVersion) == "1.0.4");
+  CHECK(adhan::ui::app_version() == std::wstring(L"v1.0.5"));
+  CHECK(std::string(kVersion) == "1.0.5");
   CHECK(adhan::ui::source_text("islamicfinder").find(L"IslamicFinder") != std::wstring::npos);
   CHECK(adhan::ui::source_text("aladhan").find(L"Aladhan") != std::wstring::npos);
   CHECK(std::wstring(adhan::ui::location_label()) == std::wstring(L"Konum"));
